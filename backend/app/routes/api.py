@@ -331,7 +331,7 @@ async def ws_telemetry(ws: WebSocket):
         while True:
             payload = await q.get()
             await ws.send_json(payload)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError, Exception):
         pass
     finally:
         bus.unsubscribe(q)
@@ -346,7 +346,7 @@ async def ws_node_events(ws: WebSocket):
         while True:
             payload = await q.get()
             await ws.send_json(payload)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError, Exception):
         pass
     finally:
         bus.unsubscribe_events(q)
@@ -365,7 +365,7 @@ async def ws_node_logs(ws: WebSocket, node_id: str):
                     await ws.send_json({"line": line})
                 last = len(lines)
             await asyncio.sleep(0.25)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError, Exception):
         pass
 
 

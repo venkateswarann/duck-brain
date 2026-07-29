@@ -45,7 +45,19 @@ class VideoCaptureNode(Node):
         else:
             # 1. Try Picamera2 (Raspberry Pi libcamera)
             try:
-                from picamera2 import Picamera2  # type: ignore
+                try:
+                    from picamera2 import Picamera2  # type: ignore
+                except ImportError:
+                    import sys
+                    for p in [
+                        "/usr/lib/python3/dist-packages",
+                        "/usr/local/lib/python3/dist-packages",
+                        "/usr/lib/python3.11/dist-packages",
+                        "/usr/lib/python3.10/dist-packages",
+                    ]:
+                        if p not in sys.path:
+                            sys.path.append(p)
+                    from picamera2 import Picamera2  # type: ignore
 
                 picam2 = Picamera2()
                 w = int(self._config.get("width", 640))
