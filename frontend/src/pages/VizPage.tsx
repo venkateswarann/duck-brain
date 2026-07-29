@@ -12,33 +12,53 @@ interface JointData {
   online?: boolean;
 }
 
-// STL Mesh mapping from URDF file links
+// Complete STL Mesh mapping corresponding directly to your assets/ folder directory
 const STL_MAP: { stl: string; parent: string; color: number }[] = [
-  // Trunk / Body
+  // Trunk & Body Shell
   { stl: "body_front.stl", parent: "trunk", color: 0xf1f5f9 },
   { stl: "body_back.stl", parent: "trunk", color: 0xf1f5f9 },
   { stl: "body_middle_bottom.stl", parent: "trunk", color: 0xe2e8f0 },
   { stl: "body_middle_top.stl", parent: "trunk", color: 0xe2e8f0 },
-  { stl: "power_switch.stl", parent: "trunk", color: 0x3dd68c },
-  { stl: "usb_c_charger.stl", parent: "trunk", color: 0x5b9cff },
   { stl: "battery_pack_lid.stl", parent: "trunk", color: 0x334155 },
-  // Head & Beak
-  { stl: "head_pitch_assembly.stl", parent: "head_roll", color: 0xf8fafc },
-  { stl: "beak.stl", parent: "head_roll", color: 0xf59e0b },
-  // Left Leg
-  { stl: "left_hip_yaw.stl", parent: "left_hip_yaw", color: 0x3dd68c },
-  { stl: "left_hip_roll.stl", parent: "left_hip_roll", color: 0x3dd68c },
-  { stl: "left_hip_pitch.stl", parent: "left_hip_pitch", color: 0x3dd68c },
-  { stl: "left_knee.stl", parent: "left_knee", color: 0x3dd68c },
-  { stl: "left_ankle.stl", parent: "left_ankle", color: 0x3dd68c },
-  { stl: "left_foot.stl", parent: "left_ankle", color: 0xf59e0b },
-  // Right Leg
-  { stl: "right_hip_yaw.stl", parent: "right_hip_yaw", color: 0xef4444 },
-  { stl: "right_hip_roll.stl", parent: "right_hip_roll", color: 0xef4444 },
-  { stl: "right_hip_pitch.stl", parent: "right_hip_pitch", color: 0xef4444 },
-  { stl: "right_knee.stl", parent: "right_knee", color: 0xef4444 },
-  { stl: "right_ankle.stl", parent: "right_ankle", color: 0xef4444 },
-  { stl: "right_foot.stl", parent: "right_ankle", color: 0xf59e0b },
+  { stl: "trunk_bottom.stl", parent: "trunk", color: 0x334155 },
+  { stl: "trunk_top.stl", parent: "trunk", color: 0xe2e8f0 },
+  { stl: "speaker_interface.stl", parent: "trunk", color: 0x1e293b },
+  { stl: "speaker_stand.stl", parent: "trunk", color: 0x1e293b },
+  { stl: "flash_light_module.stl", parent: "trunk", color: 0xf59e0b },
+  { stl: "flash_reflector_interface.stl", parent: "trunk", color: 0x94a3b8 },
+  { stl: "bulb.stl", parent: "trunk", color: 0xfef08a },
+
+  // Head & Neck
+  { stl: "head.stl", parent: "head_roll", color: 0xf8fafc },
+  { stl: "head_bot_sheet.stl", parent: "head_pitch", color: 0x334155 },
+  { stl: "head_pitch_to_yaw.stl", parent: "head_pitch", color: 0x3dd68c },
+  { stl: "head_yaw_to_roll.stl", parent: "head_yaw", color: 0x3dd68c },
+  { stl: "head_roll_mount.stl", parent: "head_roll", color: 0x334155 },
+  { stl: "left_eye.stl", parent: "head_roll", color: 0x0f172a },
+  { stl: "right_eye.stl", parent: "head_roll", color: 0x0f172a },
+  { stl: "neck_left_sheet.stl", parent: "neck_pitch", color: 0x334155 },
+  { stl: "neck_right_sheet.stl", parent: "neck_pitch", color: 0x334155 },
+
+  // Left Leg (Green Accents)
+  { stl: "left_roll_to_pitch.stl", parent: "left_hip_roll", color: 0x3dd68c },
+  { stl: "knee_to_ankle_left_sheet.stl", parent: "left_knee", color: 0x3dd68c },
+  { stl: "left_cache.stl", parent: "left_hip_pitch", color: 0x3dd68c },
+  { stl: "left_antenna_holder.stl", parent: "left_hip_pitch", color: 0x334155 },
+  { stl: "roll_motor_bottom.stl", parent: "left_hip_yaw", color: 0x1e293b },
+  { stl: "roll_motor_top.stl", parent: "left_hip_yaw", color: 0x1e293b },
+  { stl: "leg_spacer.stl", parent: "left_hip_pitch", color: 0x3dd68c },
+
+  // Right Leg (Red Accents)
+  { stl: "right_roll_to_pitch.stl", parent: "right_hip_roll", color: 0xef4444 },
+  { stl: "knee_to_ankle_right_sheet.stl", parent: "right_knee", color: 0xef4444 },
+  { stl: "right_cache.stl", parent: "right_hip_pitch", color: 0xef4444 },
+  { stl: "right_antenna_holder.stl", parent: "right_hip_pitch", color: 0x334155 },
+
+  // Duck Feet (Yellow)
+  { stl: "foot_top.stl", parent: "left_ankle", color: 0xf59e0b },
+  { stl: "foot_bottom_pla.stl", parent: "left_ankle", color: 0xeab308 },
+  { stl: "foot_bottom_tpu.stl", parent: "left_ankle", color: 0xca8a04 },
+  { stl: "foot_side.stl", parent: "left_ankle", color: 0xf59e0b },
 ];
 
 export default function VizPage() {
@@ -382,7 +402,7 @@ export default function VizPage() {
         } catch (_) {}
       }
     };
-  }, [mode, wireframe]); // DEPEND ONLY ON MODE AND WIREFRAME TO PREVENT RE-CREATING CANVAS LOOP
+  }, [mode, wireframe]);
 
   // Group joints into sections
   const { headJoints, leftLegJoints, rightLegJoints } = useMemo(() => {
