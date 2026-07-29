@@ -13,7 +13,7 @@ interface JointData {
 }
 
 // STL Mesh mapping from URDF file links
-const STL_MAP: { stl: string; parent: string; color: number; scale?: number }[] = [
+const STL_MAP: { stl: string; parent: string; color: number }[] = [
   // Trunk / Body
   { stl: "body_front.stl", parent: "trunk", color: 0xf1f5f9 },
   { stl: "body_back.stl", parent: "trunk", color: 0xf1f5f9 },
@@ -44,16 +44,22 @@ const STL_MAP: { stl: string; parent: string; color: number; scale?: number }[] 
 export default function VizPage() {
   const { snapshot } = useTelemetry();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const motorsRef = useRef<Record<string, JointData>>({});
 
   const [mode, setMode] = useState<"3d" | "urdf">("3d");
   const [wireframe, setWireframe] = useState<boolean>(false);
-  const [loadedStlCount, setLoadedStlCount] = useState<number>(0);
+  const [stlStatus, setStlStatus] = useState<string>("Initializing 3D viewport…");
   const [urdfXml, setUrdfXml] = useState<string>("");
   const [loadingUrdf, setLoadingUrdf] = useState<boolean>(true);
   const [showJointsTable, setShowJointsTable] = useState<boolean>(true);
   const [showCameraPip, setShowCameraPip] = useState<boolean>(true);
 
   const motors = (snapshot?.motors || {}) as Record<string, JointData>;
+
+  // Keep telemetry motors in ref so animation loop reads live position without re-triggering Three.js mount
+  useEffect(() => {
+    motorsRef.current = motors;
+  }, [motors]);
 
   // Fetch URDF XML file from backend
   useEffect(() => {
@@ -66,7 +72,7 @@ export default function VizPage() {
       .finally(() => setLoadingUrdf(false));
   }, []);
 
-  // Three.js 3D Real STL CAD Mesh & Kinematic Scene Renderer
+  // Three.js 3D WebGL Scene & STL Mesh Loader
   useEffect(() => {
     if (!canvasRef.current || mode !== "3d") return;
 
@@ -78,6 +84,7 @@ export default function VizPage() {
 
     const jointNodes: Record<string, any> = {};
     const fallbackMeshes: any[] = [];
+    const stlMeshes: any[] = [];
 
     const loadThreeAndSTL = () => {
       const windowAny = window as any;
@@ -139,7 +146,7 @@ export default function VizPage() {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-      // 3. Lights
+      // 3. Lighting
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
       scene.add(ambientLight);
 
@@ -157,7 +164,7 @@ export default function VizPage() {
       grid.position.y = -0.22;
       scene.add(grid);
 
-      // 5. Open Duck Mini Scene Graph Assembly
+      // 5. Open Duck Mini Kinematic Assembly
       duckGroup = new THREE.Group();
 
       // Base Trunk Group
@@ -166,7 +173,7 @@ export default function VizPage() {
       duckGroup.add(trunkGroup);
       jointNodes["trunk"] = trunkGroup;
 
-      // Default Fallback Geometry (used while STL loads or if STL is missing)
+      // Fallback Procedural Geometry (shown while STL loads or if missing)
       const matFallback = new THREE.MeshStandardMaterial({
         color: 0x94a3b8,
         wireframe: wireframe,
@@ -248,7 +255,7 @@ export default function VizPage() {
 
       scene.add(duckGroup);
 
-      // 6. Dynamic STL CAD Mesh Loading from /api/robot/assets/{filename}
+      // 6. Asynchronous CAD STL Mesh Loading
       if (THREE.STLLoader) {
         const stlLoader = new THREE.STLLoader();
         let loadedCount = 0;
@@ -278,21 +285,20 @@ export default function VizPage() {
               const mesh = new THREE.Mesh(geometry, mat);
               mesh.castShadow = true;
               mesh.receiveShadow = true;
+              stlMeshes.push(mesh);
 
               const parentNode = jointNodes[item.parent] || trunkGroup;
               parentNode.add(mesh);
 
               loadedCount += 1;
-              setLoadedStlCount(loadedCount);
-
-              // Hide fallback shapes once CAD STL meshes begin rendering
               if (loadedCount >= 1) {
                 fallbackMeshes.forEach((fb) => (fb.visible = false));
+                setStlStatus(`${loadedCount}/${STL_MAP.length} CAD STL Meshes Loaded`);
               }
             },
             undefined,
             () => {
-              /* Ignore missing STL files — fallback geometry stays visible */
+              /* Soft ignore missing STL files */
             }
           );
         });
@@ -329,13 +335,13 @@ export default function VizPage() {
         window.addEventListener("mouseup", onMouseUp);
       }
 
-      // 8. Render & Real-Time Kinematic Joint Sync Loop
+      // 8. 60 FPS Kinematic Render & Telemetry Sync Loop
       const animate = () => {
         animationFrameId = requestAnimationFrame(animate);
 
-        // Synchronize joint angles from WebSocket telemetry
+        const currentMotors = motorsRef.current;
         Object.entries(jointNodes).forEach(([name, node]) => {
-          const val = motors[name]?.position ?? 0;
+          const val = currentMotors[name]?.position ?? 0;
           if (name.includes("pitch")) {
             node.rotation.x = val;
           } else if (name.includes("roll")) {
@@ -349,6 +355,11 @@ export default function VizPage() {
           }
         });
 
+        // Wireframe sync
+        stlMeshes.forEach((m) => {
+          if (m.material) m.material.wireframe = wireframe;
+        });
+
         renderer.render(scene, camera);
       };
 
@@ -359,8 +370,19 @@ export default function VizPage() {
 
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (renderer) {
+        try {
+          renderer.dispose();
+          renderer.forceContextLoss();
+        } catch (_) {}
+      }
+      if (scene) {
+        try {
+          scene.clear();
+        } catch (_) {}
+      }
     };
-  }, [motors, mode, wireframe]);
+  }, [mode, wireframe]); // DEPEND ONLY ON MODE AND WIREFRAME TO PREVENT RE-CREATING CANVAS LOOP
 
   // Group joints into sections
   const { headJoints, leftLegJoints, rightLegJoints } = useMemo(() => {
@@ -389,10 +411,8 @@ export default function VizPage() {
       {/* Title Bar */}
       <div className="page-title">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span>Open Duck Mini — Real STL 3D Robot CAD Renderer</span>
-          <span className="badge">
-            {loadedStlCount > 0 ? `${loadedStlCount} CAD STL Meshes Loaded` : `${totalJointsCount} Joint Nodes Active`}
-          </span>
+          <span>Open Duck Mini — 3D CAD Robot Visualizer</span>
+          <span className="badge">{stlStatus}</span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
@@ -436,7 +456,7 @@ export default function VizPage() {
           {showJointsTable && (
             <div>
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--accent)" }}>
-                3D Joint Angle State
+                3D Joint Angle Telemetry ({activeJointsCount}/{totalJointsCount})
               </div>
 
               {/* Head Section */}

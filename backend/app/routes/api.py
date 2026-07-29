@@ -102,14 +102,29 @@ async def get_robot_asset(filename: str):
     if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(400, "Invalid filename")
 
+    clean_name = filename.lower().strip()
+
+    # Direct candidate check
     candidates = [
         ASSETS_DIR / filename,
         ROOT / "assets" / filename,
+        ROOT / "print" / filename,
         Path.cwd() / "assets" / filename,
     ]
     for c in candidates:
         if c.exists() and c.is_file():
             return FileResponse(c)
+
+    # Case-insensitive recursive search across asset/print search dirs
+    search_dirs = [ASSETS_DIR, ROOT / "assets", ROOT / "print", ROOT, Path.cwd()]
+    for sdir in search_dirs:
+        if sdir.exists():
+            try:
+                for p in sdir.rglob("*"):
+                    if p.is_file() and p.name.lower() == clean_name:
+                        return FileResponse(p)
+            except Exception:  # noqa: BLE001
+                pass
 
     raise HTTPException(404, f"Asset file '{filename}' not found")
 
