@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from ..config_loader import ASSETS_DIR, ROOT, SCRIPTS_DIR, load_script_manifest, save_json
 from ..nodes.script_node import ScriptNode, discover_script_nodes
@@ -95,6 +95,23 @@ async def get_robot_urdf():
         pass
 
     raise HTTPException(404, "URDF file 'robot.urdf' not found on system")
+
+
+@router.get("/api/robot/assets/{filename}")
+async def get_robot_asset(filename: str):
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(400, "Invalid filename")
+
+    candidates = [
+        ASSETS_DIR / filename,
+        ROOT / "assets" / filename,
+        Path.cwd() / "assets" / filename,
+    ]
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return FileResponse(c)
+
+    raise HTTPException(404, f"Asset file '{filename}' not found")
 
 
 @router.get("/api/help")
