@@ -69,6 +69,14 @@ async def put_config(request: Request):
     }
 
 
+@router.get("/api/robot/urdf")
+async def get_robot_urdf():
+    urdf_path = Path(__file__).parents[2] / "assets" / "robot.urdf"
+    if not urdf_path.exists():
+        raise HTTPException(404, "URDF file not found")
+    return Response(content=urdf_path.read_text(encoding="utf-8"), media_type="application/xml")
+
+
 @router.get("/api/help")
 async def help_bundle():
     from ..help_schema import PAGE_GUIDE, PARAMETER_HELP, SETUP_STEPS
@@ -367,6 +375,30 @@ async def ws_node_logs(ws: WebSocket, node_id: str):
             await asyncio.sleep(0.25)
     except (WebSocketDisconnect, RuntimeError, Exception):
         pass
+
+
+@router.get("/api/logs/all")
+async def get_all_logs(request: Request, limit: int = 500, node_id: str | None = None):
+    bus = request.app.state.bus
+    return {"logs": bus.get_all_logs(limit=limit, node_id=node_id)}
+
+
+@router.websocket("/ws/logs/all")
+async def ws_all_logs(ws: WebSocket):
+    await ws.accept()
+    bus = ws.app.state.bus
+    q = bus.subscribe_logs()
+    try:
+        # Initial snapshot of recent logs
+        for entry in bus.get_all_logs(limit=200):
+            await ws.send_json(entry)
+        while True:
+            entry = await q.get()
+            await ws.send_json(entry)
+    except (WebSocketDisconnect, RuntimeError, Exception):
+        pass
+    finally:
+        bus.unsubscribe_logs(q)
 
 
 @router.get("/stream/camera")

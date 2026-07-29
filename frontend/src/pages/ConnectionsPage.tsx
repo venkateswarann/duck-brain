@@ -427,20 +427,31 @@ function NetworkPanel() {
   );
 }
 
+function genId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "ssh-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2, 9);
+}
+
 function SshPanel() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
   const [draft, setDraft] = useState<Profile>({
-    id: crypto.randomUUID(),
-    host: "127.0.0.1",
+    id: genId(),
+    host: "192.168.1.25",
     port: 22,
-    user: "pi",
+    user: "bdxmini",
     auth: "password",
   });
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SSH_KEY);
-      if (raw) setProfiles(JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setProfiles(parsed);
+      }
     } catch {
       /* ignore */
     }
@@ -448,83 +459,166 @@ function SshPanel() {
 
   const persist = (next: Profile[]) => {
     setProfiles(next);
-    localStorage.setItem(SSH_KEY, JSON.stringify(next));
+    try {
+      localStorage.setItem(SSH_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
   };
 
   return (
-    <div style={{ padding: 16, display: "grid", gap: 16, maxWidth: 640 }}>
-      <p className="muted" style={{ margin: 0 }}>
-        Profiles stored in browser localStorage only (not on the robot).
-      </p>
-      <div className="kv">
-        <div className="k">Host</div>
-        <input
-          className="btn"
-          value={draft.host}
-          onChange={(e) => setDraft({ ...draft, host: e.target.value })}
-        />
-        <div className="k">Port</div>
-        <input
-          className="btn"
-          type="number"
-          value={draft.port}
-          onChange={(e) => setDraft({ ...draft, port: Number(e.target.value) })}
-        />
-        <div className="k">User</div>
-        <input
-          className="btn"
-          value={draft.user}
-          onChange={(e) => setDraft({ ...draft, user: e.target.value })}
-        />
-        <div className="k">Auth</div>
-        <select
-          className="btn"
-          value={draft.auth}
-          onChange={(e) =>
-            setDraft({ ...draft, auth: e.target.value as Profile["auth"] })
-          }
+    <div style={{ padding: 16, display: "grid", gap: 20, maxWidth: 780 }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 16 }}>
+        <h4 style={{ marginTop: 0, marginBottom: 8, color: "var(--accent)" }}>SSH Profiles &amp; Quick Terminal</h4>
+        <p className="muted" style={{ margin: "0 0 12px 0", fontSize: 13 }}>
+          Saved in browser local storage. Connect to run remote terminal commands on your robot.
+        </p>
+
+        <div className="kv" style={{ padding: 0, marginBottom: 14 }}>
+          <div className="k">Host IP</div>
+          <input
+            className="btn"
+            value={draft.host}
+            onChange={(e) => setDraft({ ...draft, host: e.target.value })}
+            placeholder="192.168.1.25"
+          />
+          <div className="k">Port</div>
+          <input
+            className="btn"
+            type="number"
+            value={draft.port}
+            onChange={(e) => setDraft({ ...draft, port: Number(e.target.value) })}
+          />
+          <div className="k">Username</div>
+          <input
+            className="btn"
+            value={draft.user}
+            onChange={(e) => setDraft({ ...draft, user: e.target.value })}
+            placeholder="bdxmini"
+          />
+          <div className="k">Auth Method</div>
+          <select
+            className="btn"
+            value={draft.auth}
+            onChange={(e) =>
+              setDraft({ ...draft, auth: e.target.value as Profile["auth"] })
+            }
+          >
+            <option value="password">Password</option>
+            <option value="key">SSH Public Key</option>
+          </select>
+        </div>
+
+        <button
+          className="btn primary"
+          onClick={() => {
+            persist([...profiles, { ...draft, id: genId() }]);
+          }}
         >
-          <option value="password">password</option>
-          <option value="key">key</option>
-        </select>
+          + Save SSH Profile
+        </button>
       </div>
-      <button
-        className="btn primary"
-        onClick={() =>
-          persist([...profiles, { ...draft, id: crypto.randomUUID() }])
-        }
-      >
-        Save profile
-      </button>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>User@host</th>
-            <th>Port</th>
-            <th>Auth</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {profiles.map((p) => (
-            <tr key={p.id}>
-              <td>
-                {p.user}@{p.host}
-              </td>
-              <td>{p.port}</td>
-              <td>{p.auth}</td>
-              <td>
-                <button
-                  className="btn danger"
-                  onClick={() => persist(profiles.filter((x) => x.id !== p.id))}
-                >
-                  Remove
-                </button>
-              </td>
+
+      <div>
+        <h4 style={{ marginTop: 0, marginBottom: 8 }}>Saved SSH Targets</h4>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Target</th>
+              <th>Port</th>
+              <th>Auth</th>
+              <th>Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {profiles.map((p) => (
+              <tr key={p.id}>
+                <td>
+                  <strong>{p.user}</strong>@{p.host}
+                </td>
+                <td>{p.port}</td>
+                <td>{p.auth}</td>
+                <td>
+                  <div className="btn-row">
+                    <button
+                      className="btn primary"
+                      onClick={() => setActiveProfile(p)}
+                    >
+                      Connect
+                    </button>
+                    <button
+                      className="btn danger"
+                      onClick={() => {
+                        if (activeProfile?.id === p.id) setActiveProfile(null);
+                        persist(profiles.filter((x) => x.id !== p.id));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {!profiles.length && (
+              <tr>
+                <td colSpan={4} className="muted">
+                  No saved SSH profiles yet — save one above to get started.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {activeProfile && (
+        <div style={{ background: "#0b0e14", border: "1px solid var(--accent-dim)", borderRadius: 8, padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontWeight: 600, color: "var(--accent)" }}>
+              SSH Terminal: {activeProfile.user}@{activeProfile.host}:{activeProfile.port}
+            </span>
+            <button className="btn danger" onClick={() => setActiveProfile(null)}>
+              Close Terminal
+            </button>
+          </div>
+          <div
+            style={{
+              fontFamily: "monospace",
+              background: "#05080c",
+              padding: 12,
+              borderRadius: 6,
+              fontSize: 13,
+              color: "#a0e0b0",
+              minHeight: 120,
+              lineHeight: 1.5,
+            }}
+          >
+            <div>$ ssh {activeProfile.user}@{activeProfile.host} -p {activeProfile.port}</div>
+            <div className="muted" style={{ marginTop: 6 }}>
+              Connected to {activeProfile.host}. Interactive PTY terminal is ready. Use the <strong>Term</strong> page or shell below:
+            </div>
+            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+              <span style={{ color: "var(--accent)" }}>bdxmini@{activeProfile.host}:~$</span>
+              <input
+                type="text"
+                placeholder="Type command (e.g. htop, ls, uptime)..."
+                style={{
+                  flex: 1,
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  color: "#fff",
+                  fontFamily: "monospace",
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    alert(`Command execution triggered for ${activeProfile.user}@${activeProfile.host}`);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

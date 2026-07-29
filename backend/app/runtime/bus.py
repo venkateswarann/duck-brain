@@ -18,8 +18,10 @@ class TelemetryBus:
             "video": {"running": False},
         }
         self._logs: dict[str, Deque[str]] = defaultdict(lambda: deque(maxlen=log_maxlen))
+        self._all_logs: Deque[dict[str, Any]] = deque(maxlen=2000)
         self._subscribers: set[asyncio.Queue] = set()
         self._event_subscribers: set[asyncio.Queue] = set()
+        self._log_subscribers: set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
 
     def get_snapshot(self) -> dict[str, Any]:
@@ -44,10 +46,40 @@ class TelemetryBus:
 
     def append_log(self, node_id: str, line: str) -> None:
         self._logs[node_id].append(line)
+        ts = time.time()
+        upper = line.upper()
+        level = "INFO"
+        if "ERROR" in upper or "EXCEPTION" in upper or "FAIL" in upper:
+            level = "ERROR"
+        elif "WARN" in upper or "WARNING" in upper:
+            level = "WARN"
+
+        entry = {
+            "ts": ts,
+            "node_id": node_id,
+            "line": line,
+            "level": level,
+        }
+        self._all_logs.append(entry)
+        self._fanout_sync(self._log_subscribers, entry)
 
     def get_logs(self, node_id: str, limit: int = 200) -> list[str]:
         items = list(self._logs.get(node_id, []))
         return items[-limit:]
+
+    def get_all_logs(self, limit: int = 500, node_id: str | None = None) -> list[dict[str, Any]]:
+        items = list(self._all_logs)
+        if node_id:
+            items = [x for x in items if x.get("node_id") == node_id]
+        return items[-limit:]
+
+    def subscribe_logs(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=128)
+        self._log_subscribers.add(q)
+        return q
+
+    def unsubscribe_logs(self, q: asyncio.Queue) -> None:
+        self._log_subscribers.discard(q)
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=8)
@@ -66,6 +98,21 @@ class TelemetryBus:
         self._event_subscribers.discard(q)
 
     async def _fanout(self, subscribers: set[asyncio.Queue], payload: dict[str, Any]) -> None:
+        dead: list[asyncio.Queue] = []
+        for q in list(subscribers):
+            try:
+                if q.full():
+                    try:
+                        q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                q.put_nowait(payload)
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            subscribers.discard(q)
+
+    def _fanout_sync(self, subscribers: set[asyncio.Queue], payload: dict[str, Any]) -> None:
         dead: list[asyncio.Queue] = []
         for q in list(subscribers):
             try:
