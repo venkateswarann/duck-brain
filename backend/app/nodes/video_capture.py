@@ -21,31 +21,77 @@ class VideoCaptureNode(Node):
     resources = ["camera0"]
     topics_out = ["video"]
 
-    def __init__(self, bus: TelemetryBus, locks: ResourceLocks, device: int | str = 0) -> None:
+    def __init__(self, bus: TelemetryBus, locks: ResourceLocks, config: Any = None, device: int | str = 0) -> None:
         super().__init__(bus, locks)
-        self._device = device
+        self._duck_config = config
+        dev = getattr(config, "camera_device", device) if config else device
+        if isinstance(dev, str) and dev.isdigit():
+            dev = int(dev)
+        self._device = dev
         self._cap: Any = None
+        self._picam2: Any = None
         self._frame: Optional[bytes] = None
         self._frame_lock = asyncio.Lock()
-        self._config = {"device": device, "width": 640, "height": 480, "mock": True}
+        w = getattr(config, "camera_width", 640) if config else 640
+        h = getattr(config, "camera_height", 480) if config else 480
+        mock_forced = getattr(config, "mock_hardware", False) if config else False
+        self._config = {"device": dev, "width": w, "height": h, "mock": True, "mock_forced": mock_forced}
 
     async def on_start(self) -> None:
         mock = True
-        try:
-            import cv2  # type: ignore
+        mock_forced = self._config.get("mock_forced", False)
+        if mock_forced:
+            self.log("mock_hardware is enabled in config; using mock camera frames. Set mock_hardware: false in config for live camera.")
+        else:
+            # 1. Try Picamera2 (Raspberry Pi libcamera)
+            try:
+                from picamera2 import Picamera2  # type: ignore
 
-            cap = cv2.VideoCapture(self._device)
-            if cap is not None and cap.isOpened():
-                self._cap = cap
-                self._config["mock"] = False
+                picam2 = Picamera2()
+                w = int(self._config.get("width", 640))
+                h = int(self._config.get("height", 480))
+                cam_config = picam2.create_preview_configuration(main={"format": "XRGB8888", "size": (w, h)})
+                picam2.configure(cam_config)
+                picam2.start()
+                self._picam2 = picam2
                 mock = False
-                self.log(f"opened camera device {self._device}")
-            else:
-                if cap is not None:
-                    cap.release()
-                self.log("camera device unavailable; using mock frames")
-        except Exception as exc:  # noqa: BLE001
-            self.log(f"opencv unavailable ({exc}); using mock frames")
+                self.log("opened camera using Picamera2 (Raspberry Pi libcamera)")
+            except Exception as picam_exc:  # noqa: BLE001
+                self.log(f"picamera2 unavailable or failed ({picam_exc}); trying OpenCV...")
+
+                # 2. Try OpenCV cv2.VideoCapture
+                try:
+                    import cv2  # type: ignore
+
+                    dev = self._device
+                    cap = None
+                    if hasattr(cv2, "CAP_V4L2"):
+                        cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
+                    if cap is None or not cap.isOpened():
+                        if cap is not None:
+                            cap.release()
+                        cap = cv2.VideoCapture(dev)
+                    
+                    if (cap is None or not cap.isOpened()) and isinstance(dev, int):
+                        dev_path = f"/dev/video{dev}"
+                        if hasattr(cv2, "CAP_V4L2"):
+                            cap = cv2.VideoCapture(dev_path, cv2.CAP_V4L2)
+                        if cap is None or not cap.isOpened():
+                            if cap is not None:
+                                cap.release()
+                            cap = cv2.VideoCapture(dev_path)
+
+                    if cap is not None and cap.isOpened():
+                        self._cap = cap
+                        mock = False
+                        self.log(f"opened camera device {self._device} via OpenCV")
+                    else:
+                        if cap is not None:
+                            cap.release()
+                        self.log(f"camera device {self._device} unavailable via OpenCV; using mock frames")
+                except Exception as cv_exc:  # noqa: BLE001
+                    self.log(f"opencv unavailable ({cv_exc}); using mock frames. Install opencv-python or picamera2.")
+
         self._config["mock"] = mock
         self._task = asyncio.create_task(self._capture_loop(), name="video-capture")
         await self.bus.update(video={"running": True, "mock": mock})
@@ -58,6 +104,13 @@ class VideoCaptureNode(Node):
             except asyncio.CancelledError:
                 pass
             self._task = None
+        if self._picam2 is not None:
+            try:
+                self._picam2.stop()
+                self._picam2.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._picam2 = None
         if self._cap is not None:
             try:
                 self._cap.release()
@@ -91,6 +144,19 @@ class VideoCaptureNode(Node):
             await asyncio.sleep(1 / 15)
 
     def _grab(self) -> bytes:
+        if self._picam2 is not None and not self._config.get("mock"):
+            try:
+                import cv2  # type: ignore
+                frame = self._picam2.capture_array()
+                if frame is not None:
+                    if len(frame.shape) == 3 and frame.shape[2] == 4:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                    if ok:
+                        return buf.tobytes()
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"picam2 frame capture error: {exc}")
+
         try:
             import cv2  # type: ignore
         except Exception:

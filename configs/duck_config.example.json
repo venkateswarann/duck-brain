@@ -5,6 +5,9 @@
   "baudrate": 1000000,
   "poll_hz": 15,
   "mock_hardware": true,
+  "camera_device": 0,
+  "camera_width": 640,
+  "camera_height": 480,
   "serial_policy": "prefer_script",
   "joints": {
     "right_hip_yaw": { "id": 10, "min": -1.5, "max": 1.5, "unit": "rad" },

@@ -34,6 +34,9 @@ class DuckConfig(BaseModel):
     baudrate: int = 1_000_000
     poll_hz: float = 15.0
     mock_hardware: bool = True
+    camera_device: int | str = 0
+    camera_width: int = 640
+    camera_height: int = 480
     serial_policy: str = "prefer_script"
     joints: dict[str, JointConfig] = Field(default_factory=dict)
     joints_offsets: dict[str, float] = Field(default_factory=dict)

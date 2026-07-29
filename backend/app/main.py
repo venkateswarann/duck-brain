@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     state.registry.register(
         MotorsTelemetryNode(state.bus, state.locks, state.duck)
     )
-    state.registry.register(VideoCaptureNode(state.bus, state.locks))
+    state.registry.register(VideoCaptureNode(state.bus, state.locks, config=state.duck))
     state.registry.register(SystemMetricsNode(state.bus, state.locks))
     for sn in discover_script_nodes(
         state.bus, state.locks, load_script_manifest()
