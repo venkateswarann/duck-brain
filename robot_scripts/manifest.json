@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "camera.py": {
+      "display_name": "Camera Stream Helper",
+      "description": "Example camera helper script (wrap Open Duck Mini camera later).",
+      "resources": ["camera0"],
+      "depends_on": []
+    },
+    "rl_walk.py": {
+      "display_name": "RL Walk",
+      "description": "Placeholder for Open Duck Mini Runtime v2_rl_walk — owns the servo serial bus.",
+      "resources": ["serial"],
+      "depends_on": []
+    }
+  }
+}
