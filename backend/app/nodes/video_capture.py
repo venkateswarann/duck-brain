@@ -34,8 +34,27 @@ class VideoCaptureNode(Node):
         self._frame_lock = asyncio.Lock()
         w = getattr(config, "camera_width", 640) if config else 640
         h = getattr(config, "camera_height", 480) if config else 480
+        rot = getattr(config, "camera_rotation", 0) if config else 0
+        fps = getattr(config, "camera_fps", 15) if config else 15
+        fh = getattr(config, "camera_flip_h", False) if config else False
+        fv = getattr(config, "camera_flip_v", False) if config else False
         mock_forced = getattr(config, "mock_hardware", False) if config else False
-        self._config = {"device": dev, "width": w, "height": h, "mock": True, "mock_forced": mock_forced}
+        self._config = {
+            "device": dev,
+            "width": w,
+            "height": h,
+            "rotation": rot,
+            "fps": fps,
+            "flip_h": fh,
+            "flip_v": fv,
+            "mock": True,
+            "mock_forced": mock_forced,
+        }
+
+    async def on_config(self, config: dict[str, Any]) -> None:
+        for k in ("device", "width", "height", "rotation", "fps", "flip_h", "flip_v"):
+            if k in config:
+                self._config[k] = config[k]
 
     async def on_start(self) -> None:
         mock = True
@@ -153,7 +172,28 @@ class VideoCaptureNode(Node):
             await self.bus.update(
                 video={"running": True, "mock": self._config.get("mock", True), "ts": time.time()}
             )
-            await asyncio.sleep(1 / 15)
+            fps = max(1, min(60, int(self._config.get("fps", 15))))
+            await asyncio.sleep(1 / fps)
+
+    def _transform_frame(self, frame: Any) -> Any:
+        try:
+            import cv2  # type: ignore
+        except Exception:
+            return frame
+
+        rot = int(self._config.get("rotation", 0))
+        if rot == 180:
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        elif rot == 90:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        elif rot == 270:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        if self._config.get("flip_h"):
+            frame = cv2.flip(frame, 1)
+        if self._config.get("flip_v"):
+            frame = cv2.flip(frame, 0)
+        return frame
 
     def _grab(self) -> bytes:
         if self._picam2 is not None and not self._config.get("mock"):
@@ -163,6 +203,7 @@ class VideoCaptureNode(Node):
                 if frame is not None:
                     if len(frame.shape) == 3 and frame.shape[2] == 4:
                         frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                    frame = self._transform_frame(frame)
                     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     if ok:
                         return buf.tobytes()
@@ -180,6 +221,7 @@ class VideoCaptureNode(Node):
                 w = int(self._config.get("width", 640))
                 h = int(self._config.get("height", 480))
                 frame = cv2.resize(frame, (w, h))
+                frame = self._transform_frame(frame)
                 ok2, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 if ok2:
                     return buf.tobytes()
