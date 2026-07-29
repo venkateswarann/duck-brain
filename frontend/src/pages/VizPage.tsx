@@ -185,8 +185,28 @@ export default function VizPage() {
           apiUrl("/api/robot/urdf"),
           (robot: any) => {
             robotModel = robot;
-            robot.rotation.x = -Math.PI / 2; // Orient upright
             scene.add(robot);
+
+            // Auto-scale and frame camera cleanly around robot bounding box
+            setTimeout(() => {
+              try {
+                const box = new THREE.Box3().setFromObject(robot);
+                const size = box.getSize(new THREE.Vector3());
+                const center = box.getCenter(new THREE.Vector3());
+
+                if (Math.max(size.x, size.y, size.z) > 5.0) {
+                  robot.scale.set(0.001, 0.001, 0.001);
+                  box.setFromObject(robot);
+                  box.getSize(size);
+                  box.getCenter(center);
+                }
+
+                const maxDim = Math.max(size.x, size.y, size.z, 0.3);
+                camera.position.set(center.x + maxDim * 1.2, center.y + maxDim * 0.6, center.z + maxDim * 1.5);
+                camera.lookAt(center);
+              } catch (_) {}
+            }, 300);
+
             setRobotStatus("Full CAD URDF Robot Model Loaded");
           },
           undefined,
