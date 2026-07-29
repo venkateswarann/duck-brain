@@ -12,12 +12,42 @@ interface JointData {
   online?: boolean;
 }
 
+// STL Mesh mapping from URDF file links
+const STL_MAP: { stl: string; parent: string; color: number; scale?: number }[] = [
+  // Trunk / Body
+  { stl: "body_front.stl", parent: "trunk", color: 0xf1f5f9 },
+  { stl: "body_back.stl", parent: "trunk", color: 0xf1f5f9 },
+  { stl: "body_middle_bottom.stl", parent: "trunk", color: 0xe2e8f0 },
+  { stl: "body_middle_top.stl", parent: "trunk", color: 0xe2e8f0 },
+  { stl: "power_switch.stl", parent: "trunk", color: 0x3dd68c },
+  { stl: "usb_c_charger.stl", parent: "trunk", color: 0x5b9cff },
+  { stl: "battery_pack_lid.stl", parent: "trunk", color: 0x334155 },
+  // Head & Beak
+  { stl: "head_pitch_assembly.stl", parent: "head_roll", color: 0xf8fafc },
+  { stl: "beak.stl", parent: "head_roll", color: 0xf59e0b },
+  // Left Leg
+  { stl: "left_hip_yaw.stl", parent: "left_hip_yaw", color: 0x3dd68c },
+  { stl: "left_hip_roll.stl", parent: "left_hip_roll", color: 0x3dd68c },
+  { stl: "left_hip_pitch.stl", parent: "left_hip_pitch", color: 0x3dd68c },
+  { stl: "left_knee.stl", parent: "left_knee", color: 0x3dd68c },
+  { stl: "left_ankle.stl", parent: "left_ankle", color: 0x3dd68c },
+  { stl: "left_foot.stl", parent: "left_ankle", color: 0xf59e0b },
+  // Right Leg
+  { stl: "right_hip_yaw.stl", parent: "right_hip_yaw", color: 0xef4444 },
+  { stl: "right_hip_roll.stl", parent: "right_hip_roll", color: 0xef4444 },
+  { stl: "right_hip_pitch.stl", parent: "right_hip_pitch", color: 0xef4444 },
+  { stl: "right_knee.stl", parent: "right_knee", color: 0xef4444 },
+  { stl: "right_ankle.stl", parent: "right_ankle", color: 0xef4444 },
+  { stl: "right_foot.stl", parent: "right_ankle", color: 0xf59e0b },
+];
+
 export default function VizPage() {
   const { snapshot } = useTelemetry();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const [mode, setMode] = useState<"3d" | "urdf">("3d");
   const [wireframe, setWireframe] = useState<boolean>(false);
+  const [loadedStlCount, setLoadedStlCount] = useState<number>(0);
   const [urdfXml, setUrdfXml] = useState<string>("");
   const [loadingUrdf, setLoadingUrdf] = useState<boolean>(true);
   const [showJointsTable, setShowJointsTable] = useState<boolean>(true);
@@ -36,7 +66,7 @@ export default function VizPage() {
       .finally(() => setLoadingUrdf(false));
   }, []);
 
-  // Three.js 3D WebGL Realistic Open Duck Mini Renderer
+  // Three.js 3D Real STL CAD Mesh & Kinematic Scene Renderer
   useEffect(() => {
     if (!canvasRef.current || mode !== "3d") return;
 
@@ -47,15 +77,40 @@ export default function VizPage() {
     let duckGroup: any;
 
     const jointNodes: Record<string, any> = {};
+    const fallbackMeshes: any[] = [];
 
-    const loadThree = () => {
-      if (typeof (window as any).THREE === "undefined") {
-        const script = document.createElement("script");
-        script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
-        script.onload = () => init3D();
-        document.body.appendChild(script);
+    const loadThreeAndSTL = () => {
+      const windowAny = window as any;
+
+      const runInit = () => {
+        if (windowAny.THREE && windowAny.THREE.STLLoader) {
+          init3D();
+        } else {
+          setTimeout(runInit, 50);
+        }
+      };
+
+      if (!windowAny.THREE) {
+        const s1 = document.createElement("script");
+        s1.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
+        s1.onload = () => {
+          if (!windowAny.THREE?.STLLoader) {
+            const s2 = document.createElement("script");
+            s2.src = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js";
+            s2.onload = () => runInit();
+            document.body.appendChild(s2);
+          } else {
+            runInit();
+          }
+        };
+        document.body.appendChild(s1);
+      } else if (!windowAny.THREE.STLLoader) {
+        const s2 = document.createElement("script");
+        s2.src = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js";
+        s2.onload = () => runInit();
+        document.body.appendChild(s2);
       } else {
-        init3D();
+        runInit();
       }
     };
 
@@ -66,16 +121,15 @@ export default function VizPage() {
       const width = canvasRef.current.parentElement?.clientWidth || 700;
       const height = canvasRef.current.parentElement?.clientHeight || 550;
 
-      // 1. Scene setup
+      // 1. Scene & Camera
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x0a0e17);
+      scene.background = new THREE.Color(0x080c14);
 
-      // 2. Camera setup
       camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-      camera.position.set(0.6, 0.45, 0.85);
-      camera.lookAt(0, 0.18, 0);
+      camera.position.set(0.65, 0.4, 0.85);
+      camera.lookAt(0, 0.15, 0);
 
-      // 3. WebGL Renderer
+      // 2. Renderer
       renderer = new THREE.WebGLRenderer({
         canvas: canvasRef.current,
         antialias: true,
@@ -85,8 +139,8 @@ export default function VizPage() {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-      // 4. Lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+      // 3. Lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
       scene.add(ambientLight);
 
       const mainLight = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -94,89 +148,37 @@ export default function VizPage() {
       mainLight.castShadow = true;
       scene.add(mainLight);
 
-      const fillLight = new THREE.DirectionalLight(0x5b9cff, 0.4);
-      fillLight.position.set(-3, 2, -2);
-      scene.add(fillLight);
+      const blueLight = new THREE.DirectionalLight(0x5b9cff, 0.4);
+      blueLight.position.set(-3, 2, -2);
+      scene.add(blueLight);
 
-      const rimLight = new THREE.PointLight(0x3dd68c, 0.6, 5);
-      rimLight.position.set(0, 0.8, -0.5);
-      scene.add(rimLight);
-
-      // 5. Grid Floor
+      // 4. Grid Floor
       const grid = new THREE.GridHelper(3, 30, 0x3dd68c, 0x1e293b);
       grid.position.y = -0.22;
       scene.add(grid);
 
-      // 6. Detailed 3D Open Duck Mini Model Assembly
+      // 5. Open Duck Mini Scene Graph Assembly
       duckGroup = new THREE.Group();
 
-      // Color Palette & Materials
-      const matFeather = new THREE.MeshStandardMaterial({
-        color: 0xf1f5f9,
-        roughness: 0.3,
-        metalness: 0.1,
-        wireframe: wireframe,
-      });
-      const matBeak = new THREE.MeshStandardMaterial({
-        color: 0xf59e0b,
-        roughness: 0.2,
-        metalness: 0.2,
-        wireframe: wireframe,
-      });
-      const matJoints = new THREE.MeshStandardMaterial({
-        color: 0x3dd68c,
-        roughness: 0.4,
-        metalness: 0.6,
-        wireframe: wireframe,
-      });
-      const matServo = new THREE.MeshStandardMaterial({
-        color: 0x1e293b,
-        roughness: 0.5,
-        metalness: 0.7,
-        wireframe: wireframe,
-      });
-      const matLegLeft = new THREE.MeshStandardMaterial({
-        color: 0x3dd68c,
-        roughness: 0.4,
-        metalness: 0.2,
-        wireframe: wireframe,
-      });
-      const matLegRight = new THREE.MeshStandardMaterial({
-        color: 0xef4444,
-        roughness: 0.4,
-        metalness: 0.2,
-        wireframe: wireframe,
-      });
-      const matEye = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+      // Base Trunk Group
+      const trunkGroup = new THREE.Group();
+      trunkGroup.position.y = 0.18;
+      duckGroup.add(trunkGroup);
+      jointNodes["trunk"] = trunkGroup;
 
-      // --- DUCK TORSO (Trunk) ---
-      const torsoGroup = new THREE.Group();
-      torsoGroup.position.y = 0.18;
-      duckGroup.add(torsoGroup);
+      // Default Fallback Geometry (used while STL loads or if STL is missing)
+      const matFallback = new THREE.MeshStandardMaterial({
+        color: 0x94a3b8,
+        wireframe: wireframe,
+      });
+      const torsoFB = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.065, 0.15, 16), matFallback);
+      trunkGroup.add(torsoFB);
+      fallbackMeshes.push(torsoFB);
 
-      // Main Chest Body Shell
-      const chestGeo = new THREE.CylinderGeometry(0.08, 0.065, 0.15, 16);
-      const chestMesh = new THREE.Mesh(chestGeo, matFeather);
-      chestMesh.castShadow = true;
-      torsoGroup.add(chestMesh);
-
-      // Back Shell
-      const backGeo = new THREE.SphereGeometry(0.075, 16, 16);
-      const backMesh = new THREE.Mesh(backGeo, matFeather);
-      backMesh.position.set(0, 0.02, -0.03);
-      backMesh.scale.set(1, 1, 1.3);
-      torsoGroup.add(backMesh);
-
-      // Chest Badge / Power Ring
-      const ringGeo = new THREE.TorusGeometry(0.02, 0.003, 12, 24);
-      const ringMesh = new THREE.Mesh(ringGeo, matJoints);
-      ringMesh.position.set(0, 0.02, 0.082);
-      torsoGroup.add(ringMesh);
-
-      // --- NECK & HEAD ASSEMBLY ---
+      // Head & Neck
       const neckGroup = new THREE.Group();
       neckGroup.position.set(0, 0.09, 0.03);
-      torsoGroup.add(neckGroup);
+      trunkGroup.add(neckGroup);
       jointNodes["neck_pitch"] = neckGroup;
 
       const headPitchGroup = new THREE.Group();
@@ -192,33 +194,14 @@ export default function VizPage() {
       headYawGroup.add(headRollGroup);
       jointNodes["head_roll"] = headRollGroup;
 
-      // Duck Head Sphere
-      const headGeo = new THREE.SphereGeometry(0.055, 24, 24);
-      const headMesh = new THREE.Mesh(headGeo, matFeather);
-      headMesh.castShadow = true;
-      headRollGroup.add(headMesh);
+      const headFB = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 16), matFallback);
+      headRollGroup.add(headFB);
+      fallbackMeshes.push(headFB);
 
-      // Duck Bill / Beak
-      const beakShape = new THREE.BoxGeometry(0.05, 0.018, 0.07);
-      const beakMesh = new THREE.Mesh(beakShape, matBeak);
-      beakMesh.position.set(0, -0.012, 0.065);
-      beakMesh.rotation.x = 0.1;
-      beakMesh.castShadow = true;
-      headRollGroup.add(beakMesh);
-
-      // Eyes
-      const eyeGeo = new THREE.SphereGeometry(0.007, 12, 12);
-      const eyeL = new THREE.Mesh(eyeGeo, matEye);
-      eyeL.position.set(0.032, 0.015, 0.04);
-      const eyeR = new THREE.Mesh(eyeGeo, matEye);
-      eyeR.position.set(-0.032, 0.015, 0.04);
-      headRollGroup.add(eyeL);
-      headRollGroup.add(eyeR);
-
-      // --- LEFT LEG (Green Accent) ---
+      // Left Leg
       const lHipYaw = new THREE.Group();
       lHipYaw.position.set(0.045, -0.07, 0);
-      torsoGroup.add(lHipYaw);
+      trunkGroup.add(lHipYaw);
       jointNodes["left_hip_yaw"] = lHipYaw;
 
       const lHipRoll = new THREE.Group();
@@ -229,50 +212,20 @@ export default function VizPage() {
       lHipRoll.add(lHipPitch);
       jointNodes["left_hip_pitch"] = lHipPitch;
 
-      // Servo Housing
-      const servoL = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.035, 0.04), matServo);
-      lHipPitch.add(servoL);
-
-      // Left Thigh
-      const lThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.012, 0.11, 12), matLegLeft);
-      lThigh.position.y = -0.055;
-      lThigh.castShadow = true;
-      lHipPitch.add(lThigh);
-
       const lKnee = new THREE.Group();
       lKnee.position.y = -0.11;
       lHipPitch.add(lKnee);
       jointNodes["left_knee"] = lKnee;
-
-      // Knee Joint Ring
-      const lKneeJoint = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.025, 12), matJoints);
-      lKneeJoint.rotation.z = Math.PI / 2;
-      lKnee.add(lKneeJoint);
-
-      // Left Shin
-      const lShin = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.01, 0.11, 12), matLegLeft);
-      lShin.position.y = -0.055;
-      lShin.castShadow = true;
-      lKnee.add(lShin);
 
       const lAnkle = new THREE.Group();
       lAnkle.position.y = -0.11;
       lKnee.add(lAnkle);
       jointNodes["left_ankle"] = lAnkle;
 
-      // Webbed Duck Foot Left
-      const lFoot = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.015, 3), matBeak);
-      lFoot.rotation.x = -Math.PI / 2;
-      lFoot.rotation.z = Math.PI;
-      lFoot.position.set(0, -0.008, 0.025);
-      lFoot.scale.set(1.2, 0.4, 1.8);
-      lFoot.castShadow = true;
-      lAnkle.add(lFoot);
-
-      // --- RIGHT LEG (Red Accent) ---
+      // Right Leg
       const rHipYaw = new THREE.Group();
       rHipYaw.position.set(-0.045, -0.07, 0);
-      torsoGroup.add(rHipYaw);
+      trunkGroup.add(rHipYaw);
       jointNodes["right_hip_yaw"] = rHipYaw;
 
       const rHipRoll = new THREE.Group();
@@ -283,47 +236,67 @@ export default function VizPage() {
       rHipRoll.add(rHipPitch);
       jointNodes["right_hip_pitch"] = rHipPitch;
 
-      // Servo Housing
-      const servoR = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.035, 0.04), matServo);
-      rHipPitch.add(servoR);
-
-      // Right Thigh
-      const rThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.012, 0.11, 12), matLegRight);
-      rThigh.position.y = -0.055;
-      rThigh.castShadow = true;
-      rHipPitch.add(rThigh);
-
       const rKnee = new THREE.Group();
       rKnee.position.y = -0.11;
       rHipPitch.add(rKnee);
       jointNodes["right_knee"] = rKnee;
-
-      // Knee Joint Ring
-      const rKneeJoint = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.025, 12), matJoints);
-      rKneeJoint.rotation.z = Math.PI / 2;
-      rKnee.add(rKneeJoint);
-
-      // Right Shin
-      const rShin = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.01, 0.11, 12), matLegRight);
-      rShin.position.y = -0.055;
-      rShin.castShadow = true;
-      rKnee.add(rShin);
 
       const rAnkle = new THREE.Group();
       rAnkle.position.y = -0.11;
       rKnee.add(rAnkle);
       jointNodes["right_ankle"] = rAnkle;
 
-      // Webbed Duck Foot Right
-      const rFoot = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.015, 3), matBeak);
-      rFoot.rotation.x = -Math.PI / 2;
-      rFoot.rotation.z = Math.PI;
-      rFoot.position.set(0, -0.008, 0.025);
-      rFoot.scale.set(1.2, 0.4, 1.8);
-      rFoot.castShadow = true;
-      rAnkle.add(rFoot);
-
       scene.add(duckGroup);
+
+      // 6. Dynamic STL CAD Mesh Loading from /api/robot/assets/{filename}
+      if (THREE.STLLoader) {
+        const stlLoader = new THREE.STLLoader();
+        let loadedCount = 0;
+
+        STL_MAP.forEach((item) => {
+          const url = apiUrl(`/api/robot/assets/${item.stl}`);
+          stlLoader.load(
+            url,
+            (geometry: any) => {
+              geometry.computeVertexNormals();
+              geometry.computeBoundingBox();
+              const box = geometry.boundingBox;
+              if (box) {
+                const size = new THREE.Vector3();
+                box.getSize(size);
+                if (Math.max(size.x, size.y, size.z) > 5) {
+                  geometry.scale(0.001, 0.001, 0.001);
+                }
+              }
+
+              const mat = new THREE.MeshStandardMaterial({
+                color: item.color,
+                roughness: 0.3,
+                metalness: 0.2,
+                wireframe: wireframe,
+              });
+              const mesh = new THREE.Mesh(geometry, mat);
+              mesh.castShadow = true;
+              mesh.receiveShadow = true;
+
+              const parentNode = jointNodes[item.parent] || trunkGroup;
+              parentNode.add(mesh);
+
+              loadedCount += 1;
+              setLoadedStlCount(loadedCount);
+
+              // Hide fallback shapes once CAD STL meshes begin rendering
+              if (loadedCount >= 1) {
+                fallbackMeshes.forEach((fb) => (fb.visible = false));
+              }
+            },
+            undefined,
+            () => {
+              /* Ignore missing STL files — fallback geometry stays visible */
+            }
+          );
+        });
+      }
 
       // 7. Interactive Mouse Orbit Controls
       let isDragging = false;
@@ -356,11 +329,11 @@ export default function VizPage() {
         window.addEventListener("mouseup", onMouseUp);
       }
 
-      // 8. 60 FPS Render & Joint Sync Loop
+      // 8. Render & Real-Time Kinematic Joint Sync Loop
       const animate = () => {
         animationFrameId = requestAnimationFrame(animate);
 
-        // Dynamic joint rotations from WebSocket telemetry
+        // Synchronize joint angles from WebSocket telemetry
         Object.entries(jointNodes).forEach(([name, node]) => {
           const val = motors[name]?.position ?? 0;
           if (name.includes("pitch")) {
@@ -382,7 +355,7 @@ export default function VizPage() {
       animate();
     };
 
-    loadThree();
+    loadThreeAndSTL();
 
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
@@ -416,9 +389,9 @@ export default function VizPage() {
       {/* Title Bar */}
       <div className="page-title">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span>Open Duck Mini — Realistic 3D Robot Visualizer</span>
+          <span>Open Duck Mini — Real STL 3D Robot CAD Renderer</span>
           <span className="badge">
-            {totalJointsCount > 0 ? `${activeJointsCount}/${totalJointsCount} Servos Active` : "Telemetry Standby"}
+            {loadedStlCount > 0 ? `${loadedStlCount} CAD STL Meshes Loaded` : `${totalJointsCount} Joint Nodes Active`}
           </span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -426,7 +399,7 @@ export default function VizPage() {
             className={`btn ${mode === "3d" ? "primary" : ""}`}
             onClick={() => setMode("3d")}
           >
-            3D Robot Model
+            3D STL Robot Model
           </button>
           <button
             className={`btn ${mode === "urdf" ? "primary" : ""}`}
@@ -535,7 +508,7 @@ export default function VizPage() {
                   color: "var(--muted)",
                 }}
               >
-                🖱️ Drag mouse to orbit 3D duck model · Scroll to zoom
+                🖱️ Drag mouse to orbit CAD STL duck model · Scroll to zoom
               </div>
 
               {/* Camera PIP Overlay */}

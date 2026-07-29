@@ -215,9 +215,7 @@ class VideoCaptureNode(Node):
                     if ok:
                         return buf.tobytes()
             except Exception as exc:  # noqa: BLE001
-                self.log(f"picam2 frame capture error: {exc}")
-            except Exception as exc:  # noqa: BLE001
-                self.log(f"picam2 frame capture error: {exc}")
+                self.log(f"picam2 capture timeout or hardware error: {exc}")
 
         try:
             import cv2  # type: ignore
