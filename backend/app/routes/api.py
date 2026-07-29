@@ -4,10 +4,10 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
-from ..config_loader import SCRIPTS_DIR, load_script_manifest, save_json
+from ..config_loader import ASSETS_DIR, ROOT, SCRIPTS_DIR, load_script_manifest, save_json
 from ..nodes.script_node import ScriptNode, discover_script_nodes
 
 router = APIRouter(tags=["api"])
@@ -71,10 +71,30 @@ async def put_config(request: Request):
 
 @router.get("/api/robot/urdf")
 async def get_robot_urdf():
-    urdf_path = Path(__file__).parents[2] / "assets" / "robot.urdf"
-    if not urdf_path.exists():
-        raise HTTPException(404, "URDF file not found")
-    return Response(content=urdf_path.read_text(encoding="utf-8"), media_type="application/xml")
+    candidates = [
+        ASSETS_DIR / "robot.urdf",
+        ROOT / "assets" / "robot.urdf",
+        Path.cwd() / "assets" / "robot.urdf",
+        Path.cwd().parent / "assets" / "robot.urdf",
+        Path(__file__).resolve().parents[2] / "assets" / "robot.urdf",
+        Path(__file__).resolve().parents[3] / "assets" / "robot.urdf",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return Response(content=candidate.read_text(encoding="utf-8"), media_type="application/xml")
+
+    # Recursive fallback search across root parent directories
+    search_root = ROOT if ROOT.exists() else Path.cwd()
+    if search_root.parent.exists():
+        search_root = search_root.parent
+    try:
+        for p in search_root.rglob("robot.urdf"):
+            if p.is_file():
+                return Response(content=p.read_text(encoding="utf-8"), media_type="application/xml")
+    except Exception:  # noqa: BLE001
+        pass
+
+    raise HTTPException(404, "URDF file 'robot.urdf' not found on system")
 
 
 @router.get("/api/help")

@@ -11,6 +11,7 @@ DEFAULT_CONFIG = ROOT / "configs" / "duck_config.json"
 EXAMPLE_CONFIG = ROOT / "configs" / "duck_config.example.json"
 DEFAULT_PINOUT = ROOT / "configs" / "pinout_schema.example.json"
 SCRIPTS_DIR = ROOT / "robot_scripts"
+ASSETS_DIR = ROOT / "assets"
 BOARDS_DIR = Path(__file__).resolve().parent / "boards"
 
 
