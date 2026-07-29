@@ -10,6 +10,7 @@ export default function CameraPage() {
   const [rotation, setRotation] = useState<number>(180); // Default 180 for inverted setup
   const [flipH, setFlipH] = useState<boolean>(false);
   const [flipV, setFlipV] = useState<boolean>(false);
+  const [swapRb, setSwapRb] = useState<boolean>(false);
   const [resolution, setResolution] = useState<string>("640x480");
   const [fps, setFps] = useState<number>(15);
   const [saving, setSaving] = useState<boolean>(false);
@@ -24,6 +25,7 @@ export default function CameraPage() {
           if (typeof cfg.rotation === "number") setRotation(cfg.rotation);
           if (typeof cfg.flip_h === "boolean") setFlipH(cfg.flip_h);
           if (typeof cfg.flip_v === "boolean") setFlipV(cfg.flip_v);
+          if (typeof cfg.swap_rb === "boolean") setSwapRb(cfg.swap_rb);
           if (typeof cfg.fps === "number") setFps(cfg.fps);
           if (cfg.width && cfg.height) setResolution(`${cfg.width}x${cfg.height}`);
         }
@@ -31,7 +33,7 @@ export default function CameraPage() {
       .catch(() => {});
   }, []);
 
-  const applyConfig = async (newRotation: number, newFlipH: boolean, newFlipV: boolean, newRes: string, newFps: number) => {
+  const applyConfig = async (newRotation: number, newFlipH: boolean, newFlipV: boolean, newSwapRb: boolean, newRes: string, newFps: number) => {
     setSaving(true);
     setStatusMsg("");
     const [w, h] = newRes.split("x").map(Number);
@@ -43,6 +45,7 @@ export default function CameraPage() {
           rotation: newRotation,
           flip_h: newFlipH,
           flip_v: newFlipV,
+          swap_rb: newSwapRb,
           width: w,
           height: h,
           fps: newFps,
@@ -63,29 +66,35 @@ export default function CameraPage() {
 
   const handleRotationChange = (deg: number) => {
     setRotation(deg);
-    applyConfig(deg, flipH, flipV, resolution, fps);
+    applyConfig(deg, flipH, flipV, swapRb, resolution, fps);
   };
 
   const handleFlipHChange = () => {
     const val = !flipH;
     setFlipH(val);
-    applyConfig(rotation, val, flipV, resolution, fps);
+    applyConfig(rotation, val, flipV, swapRb, resolution, fps);
   };
 
   const handleFlipVChange = () => {
     const val = !flipV;
     setFlipV(val);
-    applyConfig(rotation, flipH, val, resolution, fps);
+    applyConfig(rotation, flipH, val, swapRb, resolution, fps);
+  };
+
+  const handleSwapRbChange = () => {
+    const val = !swapRb;
+    setSwapRb(val);
+    applyConfig(rotation, flipH, flipV, val, resolution, fps);
   };
 
   const handleResChange = (resStr: string) => {
     setResolution(resStr);
-    applyConfig(rotation, flipH, flipV, resStr, fps);
+    applyConfig(rotation, flipH, flipV, swapRb, resStr, fps);
   };
 
   const handleFpsChange = (newFps: number) => {
     setFps(newFps);
-    applyConfig(rotation, flipH, flipV, resolution, newFps);
+    applyConfig(rotation, flipH, flipV, swapRb, resolution, newFps);
   };
 
   // Compute CSS transform for instant preview & display
@@ -149,6 +158,13 @@ export default function CameraPage() {
             onClick={handleFlipVChange}
           >
             Vertical ↕
+          </button>
+          <button
+            className={`btn ${swapRb ? "primary" : ""}`}
+            style={{ padding: "4px 8px", fontSize: 12 }}
+            onClick={handleSwapRbChange}
+          >
+            Swap R/B Colors 🎨
           </button>
         </div>
 

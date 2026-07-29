@@ -38,6 +38,7 @@ class VideoCaptureNode(Node):
         fps = getattr(config, "camera_fps", 15) if config else 15
         fh = getattr(config, "camera_flip_h", False) if config else False
         fv = getattr(config, "camera_flip_v", False) if config else False
+        srb = getattr(config, "camera_swap_rb", False) if config else False
         mock_forced = getattr(config, "mock_hardware", False) if config else False
         self._config = {
             "device": dev,
@@ -47,12 +48,13 @@ class VideoCaptureNode(Node):
             "fps": fps,
             "flip_h": fh,
             "flip_v": fv,
+            "swap_rb": srb,
             "mock": True,
             "mock_forced": mock_forced,
         }
 
     async def on_config(self, config: dict[str, Any]) -> None:
-        for k in ("device", "width", "height", "rotation", "fps", "flip_h", "flip_v"):
+        for k in ("device", "width", "height", "rotation", "fps", "flip_h", "flip_v", "swap_rb"):
             if k in config:
                 self._config[k] = config[k]
 
@@ -81,7 +83,7 @@ class VideoCaptureNode(Node):
                 picam2 = Picamera2()
                 w = int(self._config.get("width", 640))
                 h = int(self._config.get("height", 480))
-                cam_config = picam2.create_preview_configuration(main={"format": "XRGB8888", "size": (w, h)})
+                cam_config = picam2.create_preview_configuration(main={"format": "RGB888", "size": (w, h)})
                 picam2.configure(cam_config)
                 picam2.start()
                 self._picam2 = picam2
@@ -193,6 +195,8 @@ class VideoCaptureNode(Node):
             frame = cv2.flip(frame, 1)
         if self._config.get("flip_v"):
             frame = cv2.flip(frame, 0)
+        if self._config.get("swap_rb"):
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return frame
 
     def _grab(self) -> bytes:
@@ -201,12 +205,17 @@ class VideoCaptureNode(Node):
                 import cv2  # type: ignore
                 frame = self._picam2.capture_array()
                 if frame is not None:
-                    if len(frame.shape) == 3 and frame.shape[2] == 4:
-                        frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                    if len(frame.shape) == 3:
+                        if frame.shape[2] == 4:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                        elif frame.shape[2] == 3:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                     frame = self._transform_frame(frame)
                     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     if ok:
                         return buf.tobytes()
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"picam2 frame capture error: {exc}")
             except Exception as exc:  # noqa: BLE001
                 self.log(f"picam2 frame capture error: {exc}")
 

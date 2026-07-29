@@ -41,6 +41,7 @@ class DuckConfig(BaseModel):
     camera_fps: int = 15
     camera_flip_h: bool = False
     camera_flip_v: bool = False
+    camera_swap_rb: bool = False
     serial_policy: str = "prefer_script"
     joints: dict[str, JointConfig] = Field(default_factory=dict)
     joints_offsets: dict[str, float] = Field(default_factory=dict)
