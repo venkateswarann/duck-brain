@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
+# Backend only. For backend + frontend together use ./scripts/run.sh
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "Starting DCS backend on :8000 ..."
-cd "$ROOT/backend"
-# shellcheck disable=SC1091
-source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec "$ROOT/scripts/run.sh" --backend-only "$@"

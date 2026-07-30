@@ -16,6 +16,7 @@ ROBOT_ID="duck-mini-001"
 ROBOT_NAME="Open Duck Mini"
 POLL_HZ="15"
 BOARD="rpi5"
+ROBOT_ASSETS_SRC=""
 
 usage() {
   cat <<EOF
@@ -33,6 +34,9 @@ Options:
   --robot-name NAME      Display name
   --poll-hz N            Motor poll rate (default: 15)
   --board BOARD          Pinout board id: rpi5 | jetson_orin_nx (default: rpi5)
+  --robot-assets DIR     Copy URDF + meshes from a checkout of Open_Duck_Mini,
+                         i.e. <repo>/mini_bdx/robots/open_duck_mini_v2
+                         (auto-detected when assets/ is empty)
   -h, --help             Show this help
 
 Examples:
@@ -53,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --robot-name) ROBOT_NAME="$2"; shift 2 ;;
     --poll-hz) POLL_HZ="$2"; shift 2 ;;
     --board) BOARD="$2"; shift 2 ;;
+    --robot-assets) ROBOT_ASSETS_SRC="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1"; usage; exit 1 ;;
   esac
@@ -166,6 +171,51 @@ print(f"Updated pinout board=$BOARD")
 PY
 fi
 
+echo
+echo "--- Robot description (3D model) ---"
+install_robot_assets() {
+  local src="$1"
+  mkdir -p "$ROOT/assets"
+  cp "$src"/*.stl "$ROOT/assets/"
+  cp "$src/robot.urdf" "$ROOT/assets/robot.urdf"
+  # MJCF kept beside the URDF for MuJoCo parity / reference.
+  [[ -f "$src/robot.xml" ]] && cp "$src/robot.xml" "$ROOT/assets/robot.mjcf.xml"
+  [[ -f "$src/scene.xml" ]] && cp "$src/scene.xml" "$ROOT/assets/scene.mjcf.xml"
+  echo "Installed robot description from $src"
+}
+
+if [[ -n "$ROBOT_ASSETS_SRC" ]]; then
+  if [[ -f "$ROBOT_ASSETS_SRC/robot.urdf" ]]; then
+    install_robot_assets "$ROBOT_ASSETS_SRC"
+  else
+    echo "Warning: $ROBOT_ASSETS_SRC has no robot.urdf — skipping."
+  fi
+elif [[ ! -f "$ROOT/assets/robot.urdf" ]]; then
+  # The meshes under Open_Duck_Mini/print/ share these filenames but are in
+  # millimetres; only the robots/open_duck_mini_v2 set matches the URDF.
+  found=""
+  for base in "$ROOT/.." "$HOME" "$HOME/repos"; do
+    [[ -d "$base" ]] || continue
+    found="$(find "$base" -maxdepth 6 -type d -path '*/mini_bdx/robots/open_duck_mini_v2' 2>/dev/null | head -1)"
+    [[ -n "$found" ]] && break
+  done
+  if [[ -n "$found" ]]; then
+    install_robot_assets "$found"
+  else
+    echo "No robot description found. The 3D Viz page needs assets/robot.urdf + meshes."
+    echo "Clone https://github.com/apirrone/Open_Duck_Mini then re-run:"
+    echo "  ./scripts/setup.sh --robot-assets <path>/mini_bdx/robots/open_duck_mini_v2"
+  fi
+else
+  echo "assets/robot.urdf already present"
+fi
+
+if [[ -f "$ROOT/assets/robot.urdf" ]]; then
+  python3 "$ROOT/scripts/check_robot_assets.py" || {
+    echo "Warning: robot description checks failed — the 3D viewer may render incorrectly."
+  }
+fi
+
 if [[ "$WITH_FRONTEND" -eq 1 ]]; then
   echo
   echo "--- Frontend ---"
@@ -180,12 +230,14 @@ cat <<EOF
 
 === Setup complete ===
 
-Start backend:
-  cd $ROOT/backend && source .venv/bin/activate
-  uvicorn app.main:app --host 0.0.0.0 --port 8000
+Start everything (backend + frontend, Ctrl+C stops both):
+  $ROOT/scripts/run.sh
 
-Start frontend:
-  cd $ROOT/frontend && npm run dev
+Options:
+  ./scripts/run.sh --reload            # uvicorn auto-reload
+  ./scripts/run.sh --backend-only
+  ./scripts/run.sh --frontend-only
+  ./scripts/run.sh --port 8001 --frontend-port 5174
 
 Open UI:  http://127.0.0.1:5173
 Help/Setup page: http://127.0.0.1:5173/help

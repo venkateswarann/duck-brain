@@ -3,8 +3,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config_loader import (
     BOARDS_DIR,
@@ -21,7 +22,11 @@ from .nodes.system_metrics import SystemMetricsNode
 from .nodes.video_capture import VideoCaptureNode
 from .routes import api as api_routes
 from .routes import nodes as nodes_routes
+from .routes import terminal as terminal_routes
+from .routes import video as video_routes
 from .runtime.bus import TelemetryBus
+from .services.frame_hub import FrameHub
+from .services.script_fs import ScriptFsError
 from .runtime.locks import ResourceLocks
 from .runtime.registry import NodeRegistry
 
@@ -33,6 +38,7 @@ class AppState:
         self.bus = TelemetryBus()
         self.locks = ResourceLocks()
         self.registry = NodeRegistry(self.bus, self.locks)
+        self.frames = FrameHub()
         pinout_live = DEFAULT_CONFIG.parent / "pinout_schema.json"
         self.pinout_path = pinout_live if pinout_live.exists() else DEFAULT_PINOUT
         self.pinout = load_json(self.pinout_path) or {
@@ -80,6 +86,12 @@ def create_app() -> FastAPI:
     )
     app.include_router(api_routes.router)
     app.include_router(nodes_routes.router)
+    app.include_router(terminal_routes.router)
+    app.include_router(video_routes.router)
+
+    @app.exception_handler(ScriptFsError)
+    async def script_fs_error(_request: Request, exc: ScriptFsError):
+        return JSONResponse({"detail": exc.message}, status_code=exc.status)
 
     @app.get("/")
     async def root():

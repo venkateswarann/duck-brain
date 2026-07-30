@@ -1,467 +1,300 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTelemetry } from "../hooks/useTelemetry";
 import { apiUrl } from "../config";
+import { RobotScene, type JointInfo, type SceneStats, type ViewPreset } from "../viz/RobotScene";
 
 interface JointData {
   id: number;
   name: string;
   position: number;
-  position_raw?: number;
   temperature_c?: number;
   voltage_v?: number;
   online?: boolean;
 }
 
+interface RobotModel {
+  robot_name: string;
+  root_link: string;
+  links: string[];
+  movable_joints: string[];
+  actuated_joints: string[];
+  mesh_count: number;
+  missing_meshes: string[];
+}
+
+type PoseSource = "telemetry" | "manual";
+
+const VIEWS: { id: ViewPreset; label: string }[] = [
+  { id: "iso", label: "Iso" },
+  { id: "front", label: "Front" },
+  { id: "side", label: "Side" },
+  { id: "top", label: "Top" },
+];
+
 export default function VizPage() {
   const { snapshot } = useTelemetry();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const motorsRef = useRef<Record<string, JointData>>({});
+  const sceneRef = useRef<RobotScene | null>(null);
 
-  const [mode, setMode] = useState<"3d" | "urdf">("3d");
-  const [wireframe, setWireframe] = useState<boolean>(false);
-  const [robotStatus, setRobotStatus] = useState<string>("Initializing 3D URDF Engine…");
-  const [urdfXml, setUrdfXml] = useState<string>("");
-  const [loadingUrdf, setLoadingUrdf] = useState<boolean>(true);
-  const [showJointsTable, setShowJointsTable] = useState<boolean>(true);
-  const [showCameraPip, setShowCameraPip] = useState<boolean>(true);
+  const [tab, setTab] = useState<"3d" | "urdf">("3d");
+  const [status, setStatus] = useState("Loading robot description…");
+  const [error, setError] = useState("");
+  const [joints, setJoints] = useState<JointInfo[]>([]);
+  const [stats, setStats] = useState<SceneStats | null>(null);
+  const [model, setModel] = useState<RobotModel | null>(null);
+  const [urdfXml, setUrdfXml] = useState("");
+
+  const [poseSource, setPoseSource] = useState<PoseSource>("telemetry");
+  const [manualPose, setManualPose] = useState<Record<string, number>>({});
+  const [showVisual, setShowVisual] = useState(true);
+  const [showCollision, setShowCollision] = useState(false);
+  const [wireframe, setWireframe] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showFrames, setShowFrames] = useState(false);
+  const [showCameraPip, setShowCameraPip] = useState(true);
 
   const motors = (snapshot?.motors || {}) as Record<string, JointData>;
 
-  // Keep telemetry motors in ref so animation loop reads live position without re-triggering Three.js mount
   useEffect(() => {
-    motorsRef.current = motors;
-  }, [motors]);
-
-  // Fetch URDF XML file from backend
-  useEffect(() => {
-    fetch(apiUrl("/api/robot/urdf"))
-      .then((res) => (res.ok ? res.text() : ""))
-      .then((xml) => {
-        if (xml) setUrdfXml(xml);
-      })
-      .catch(() => {})
-      .finally(() => setLoadingUrdf(false));
+    fetch(apiUrl("/api/robot/model"))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => m && setModel(m))
+      .catch(() => {});
   }, []);
 
-  // Three.js + URDFLoader Real Kinematic Duck Assembly Engine
   useEffect(() => {
-    if (!canvasRef.current || mode !== "3d") return;
+    if (tab !== "urdf" || urdfXml) return;
+    fetch(apiUrl("/api/robot/urdf"))
+      .then((r) => (r.ok ? r.text() : ""))
+      .then(setUrdfXml)
+      .catch(() => {});
+  }, [tab, urdfXml]);
 
-    let animationFrameId: number;
-    let scene: any;
-    let camera: any;
-    let renderer: any;
-    let robotModel: any;
+  // Build the scene once the 3D tab is mounted.
+  useEffect(() => {
+    if (tab !== "3d" || !canvasRef.current) return;
 
-    const loadScripts = () => {
-      const windowAny = window as any;
+    setStatus("Loading robot description…");
+    setError("");
 
-      const runInit = () => {
-        if (windowAny.THREE && windowAny.THREE.STLLoader) {
-          init3D();
-        } else {
-          setTimeout(runInit, 50);
-        }
-      };
-
-      if (!windowAny.THREE) {
-        const s1 = document.createElement("script");
-        s1.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
-        s1.onload = () => {
-          const s2 = document.createElement("script");
-          s2.src = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js";
-          s2.onload = () => {
-            const s3 = document.createElement("script");
-            s3.src = "https://cdn.jsdelivr.net/npm/urdf-loader@0.10.4/umd/URDFLoader.min.js";
-            s3.onload = () => runInit();
-            s3.onerror = () => runInit(); // Fallback if script fails
-            document.body.appendChild(s3);
-          };
-          document.body.appendChild(s2);
-        };
-        document.body.appendChild(s1);
-      } else if (!windowAny.THREE.STLLoader) {
-        const s2 = document.createElement("script");
-        s2.src = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js";
-        s2.onload = () => {
-          const s3 = document.createElement("script");
-          s3.src = "https://cdn.jsdelivr.net/npm/urdf-loader@0.10.4/umd/URDFLoader.min.js";
-          s3.onload = () => runInit();
-          s3.onerror = () => runInit();
-          document.body.appendChild(s3);
-        };
-        document.body.appendChild(s2);
-      } else {
-        runInit();
-      }
-    };
-
-    const init3D = () => {
-      const THREE = (window as any).THREE;
-      const URDFLoaderClass = (window as any).URDFLoader;
-      if (!THREE || !canvasRef.current) return;
-
-      const width = canvasRef.current.parentElement?.clientWidth || 700;
-      const height = canvasRef.current.parentElement?.clientHeight || 550;
-
-      // 1. Scene & Camera
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x080c14);
-
-      camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-      camera.position.set(0.55, 0.35, 0.75);
-      camera.lookAt(0, 0.12, 0);
-
-      // 2. Renderer
-      renderer = new THREE.WebGLRenderer({
-        canvas: canvasRef.current,
-        antialias: true,
-      });
-      renderer.setSize(width, height);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-      // 3. Lighting
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-      scene.add(ambientLight);
-
-      const mainLight = new THREE.DirectionalLight(0xffffff, 0.9);
-      mainLight.position.set(2, 4, 3);
-      mainLight.castShadow = true;
-      scene.add(mainLight);
-
-      const fillLight = new THREE.DirectionalLight(0x5b9cff, 0.4);
-      fillLight.position.set(-3, 2, -2);
-      scene.add(fillLight);
-
-      // 4. Grid Floor
-      const grid = new THREE.GridHelper(3, 30, 0x3dd68c, 0x1e293b);
-      grid.position.y = -0.22;
-      scene.add(grid);
-
-      // 5. URDFLoader Assembly
-      if (URDFLoaderClass) {
-        const urdfLoader = new URDFLoaderClass();
-
-        // Custom Mesh callback for STL loading from /api/robot/assets/{filename}
-        urdfLoader.loadMeshCb = (path: string, manager: any, done: (mesh: any) => void) => {
-          const filename = path.split("/").pop() || path;
-          if (!THREE.STLLoader) return done(new THREE.Object3D());
-
-          const stlLoader = new THREE.STLLoader(manager);
-          stlLoader.load(
-            apiUrl(`/api/robot/assets/${filename}`),
-            (geometry: any) => {
-              geometry.computeVertexNormals();
-              const lower = filename.toLowerCase();
-
-              let color = 0xf1f5f9; // Default feather white/silver
-              if (lower.includes("beak") || lower.includes("foot")) color = 0xf59e0b; // Yellow
-              else if (lower.includes("switch") || lower.includes("left")) color = 0x3dd68c; // Accent Green
-              else if (lower.includes("right")) color = 0xef4444; // Accent Red
-              else if (lower.includes("eye") || lower.includes("charger")) color = 0x1e293b; // Dark
-
-              const mat = new THREE.MeshStandardMaterial({
-                color: color,
-                roughness: 0.3,
-                metalness: 0.2,
-                wireframe: wireframe,
-              });
-              const mesh = new THREE.Mesh(geometry, mat);
-              mesh.castShadow = true;
-              mesh.receiveShadow = true;
-              done(mesh);
-            },
-            undefined,
-            () => {
-              done(new THREE.Object3D());
-            }
-          );
-        };
-
-        // Load URDF XML from Backend
-        urdfLoader.load(
-          apiUrl("/api/robot/urdf"),
-          (robot: any) => {
-            robotModel = robot;
-            scene.add(robot);
-
-            // Auto-scale and frame camera cleanly around robot bounding box
-            setTimeout(() => {
-              try {
-                const box = new THREE.Box3().setFromObject(robot);
-                const size = box.getSize(new THREE.Vector3());
-                const center = box.getCenter(new THREE.Vector3());
-
-                if (Math.max(size.x, size.y, size.z) > 5.0) {
-                  robot.scale.set(0.001, 0.001, 0.001);
-                  box.setFromObject(robot);
-                  box.getSize(size);
-                  box.getCenter(center);
-                }
-
-                const maxDim = Math.max(size.x, size.y, size.z, 0.3);
-                camera.position.set(center.x + maxDim * 1.2, center.y + maxDim * 0.6, center.z + maxDim * 1.5);
-                camera.lookAt(center);
-              } catch (_) {}
-            }, 300);
-
-            setRobotStatus("Full CAD URDF Robot Model Loaded");
-          },
-          undefined,
-          () => {
-            setRobotStatus("URDF Load Failed");
-          }
-        );
-      }
-
-      // 6. Interactive Mouse Orbit Controls
-      let isDragging = false;
-      let prevMousePos = { x: 0, y: 0 };
-
-      const onMouseDown = (e: MouseEvent) => {
-        isDragging = true;
-        prevMousePos = { x: e.clientX, y: e.clientY };
-      };
-
-      const onMouseMove = (e: MouseEvent) => {
-        if (!isDragging || !scene) return;
-        const dx = e.clientX - prevMousePos.x;
-        const dy = e.clientY - prevMousePos.y;
-
-        if (robotModel) {
-          robotModel.rotation.z += dx * 0.01;
-        }
-
-        prevMousePos = { x: e.clientX, y: e.clientY };
-      };
-
-      const onMouseUp = () => {
-        isDragging = false;
-      };
-
-      const canvas = canvasRef.current;
-      if (canvas) {
-        canvas.addEventListener("mousedown", onMouseDown);
-        window.addEventListener("mousemove", onMouseMove);
-        window.addEventListener("mouseup", onMouseUp);
-      }
-
-      // 7. 60 FPS Render & Kinematic Telemetry Sync Loop
-      const animate = () => {
-        animationFrameId = requestAnimationFrame(animate);
-
-        if (robotModel && robotModel.setJointValue) {
-          const currentMotors = motorsRef.current;
-          Object.entries(currentMotors).forEach(([name, data]) => {
-            if (typeof data.position === "number") {
-              try {
-                robotModel.setJointValue(name, data.position);
-              } catch (_) {}
-            }
-          });
-
-          // Wireframe sync
-          robotModel.traverse((child: any) => {
-            if (child.isMesh && child.material) {
-              child.material.wireframe = wireframe;
-            }
-          });
-        }
-
-        renderer.render(scene, camera);
-      };
-
-      animate();
-    };
-
-    loadScripts();
+    const scene = new RobotScene({
+      canvas: canvasRef.current,
+      urdfUrl: apiUrl("/api/robot/urdf"),
+      assetBase: apiUrl("/api/robot/assets"),
+      onProgress: (loaded, total) => setStatus(`Loading meshes ${loaded}/${total}…`),
+      onReady: (jointInfo, sceneStats) => {
+        setJoints(jointInfo);
+        setStats(sceneStats);
+        setStatus(`Assembled · ${sceneStats.meshes} meshes · ${(sceneStats.height * 100).toFixed(1)} cm tall`);
+        setManualPose((prev) => {
+          if (Object.keys(prev).length) return prev;
+          return Object.fromEntries(jointInfo.map((j) => [j.name, 0]));
+        });
+      },
+      onError: (message) => setError(message),
+    });
+    sceneRef.current = scene;
 
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      if (renderer) {
-        try {
-          renderer.dispose();
-          renderer.forceContextLoss();
-        } catch (_) {}
-      }
-      if (scene) {
-        try {
-          scene.clear();
-        } catch (_) {}
-      }
+      scene.dispose();
+      sceneRef.current = null;
     };
-  }, [mode, wireframe]);
+  }, [tab]);
 
-  // Group joints into sections
-  const { headJoints, leftLegJoints, rightLegJoints } = useMemo(() => {
-    const head: [string, JointData][] = [];
-    const left: [string, JointData][] = [];
-    const right: [string, JointData][] = [];
+  // Push display options through to the scene.
+  useEffect(() => sceneRef.current?.setShowVisual(showVisual), [showVisual, joints]);
+  useEffect(() => sceneRef.current?.setShowCollision(showCollision), [showCollision, joints]);
+  useEffect(() => sceneRef.current?.setWireframe(wireframe), [wireframe, joints]);
+  useEffect(() => sceneRef.current?.setShowGrid(showGrid), [showGrid, joints]);
+  useEffect(() => sceneRef.current?.setShowJointFrames(showFrames), [showFrames, joints]);
 
+  // Drive the model: either live servo feedback or the manual sliders.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !joints.length) return;
+
+    if (poseSource === "telemetry") {
+      const values: Record<string, number> = {};
+      Object.entries(motors).forEach(([name, m]) => {
+        if (typeof m.position === "number") values[name] = m.position;
+      });
+      scene.setJointValues(values);
+    } else {
+      scene.setJointValues(manualPose);
+    }
+  }, [motors, manualPose, poseSource, joints]);
+
+  // Refresh the FPS/triangle readout without re-rendering on every frame.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const scene = sceneRef.current;
+      if (scene) setStats(scene.getStats());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [tab]);
+
+  const setJoint = useCallback((name: string, value: number) => {
+    setPoseSource("manual");
+    setManualPose((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  const resetPose = useCallback(() => {
+    setManualPose(Object.fromEntries(joints.map((j) => [j.name, 0])));
+    setPoseSource("manual");
+  }, [joints]);
+
+  const actuated = useMemo(() => new Set(model?.actuated_joints || []), [model]);
+
+  const groups = useMemo(() => {
+    const make = (test: (n: string) => boolean) => joints.filter((j) => test(j.name));
+    return [
+      { title: "Head & Neck", items: make((n) => n.startsWith("head_") || n.startsWith("neck_")) },
+      { title: "Left Leg", items: make((n) => n.startsWith("left_hip") || n === "left_knee" || n === "left_ankle") },
+      { title: "Right Leg", items: make((n) => n.startsWith("right_hip") || n === "right_knee" || n === "right_ankle") },
+      { title: "Antennae", items: make((n) => n.includes("antenna")) },
+    ].filter((g) => g.items.length > 0);
+  }, [joints]);
+
+  const liveValues = useMemo(() => {
+    const out: Record<string, number> = {};
     Object.entries(motors).forEach(([name, m]) => {
-      if (name.startsWith("head_") || name.startsWith("neck_")) {
-        head.push([name, m]);
-      } else if (name.startsWith("left_")) {
-        left.push([name, m]);
-      } else if (name.startsWith("right_")) {
-        right.push([name, m]);
-      }
+      if (typeof m.position === "number") out[name] = m.position;
     });
-
-    return { headJoints: head, leftLegJoints: left, rightLegJoints: right };
+    return out;
   }, [motors]);
-
-  const activeJointsCount = Object.values(motors).filter((m) => m.online !== false).length;
-  const totalJointsCount = Object.keys(motors).length;
 
   return (
     <div className="page">
-      {/* Title Bar */}
       <div className="page-title">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span>Open Duck Mini — URDF CAD Assembly Renderer</span>
-          <span className="badge">{robotStatus}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span>{model?.robot_name ? `Open Duck Mini — ${model.robot_name}` : "Open Duck Mini — 3D Model"}</span>
+          <span className="badge">{status}</span>
+          {error && <span className="badge" style={{ color: "var(--danger)" }}>{error}</span>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className={`btn ${mode === "3d" ? "primary" : ""}`}
-            onClick={() => setMode("3d")}
-          >
-            3D STL Robot Model
+          <button className={`btn ${tab === "3d" ? "primary" : ""}`} onClick={() => setTab("3d")}>
+            3D Viewer
           </button>
-          <button
-            className={`btn ${mode === "urdf" ? "primary" : ""}`}
-            onClick={() => setMode("urdf")}
-          >
-            URDF Source XML
+          <button className={`btn ${tab === "urdf" ? "primary" : ""}`} onClick={() => setTab("urdf")}>
+            URDF Source
           </button>
         </div>
       </div>
 
       <div className="split split-tree">
-        {/* Left Panel — Joint State & Controls */}
-        <div className="panel" style={{ padding: 14 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: "var(--accent)" }}>
-            Render Options
+        <div className="panel" style={{ padding: 14, overflowY: "auto" }}>
+          <SectionTitle>Pose source</SectionTitle>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <button
+              className={`btn ${poseSource === "telemetry" ? "primary" : ""}`}
+              style={{ flex: 1 }}
+              onClick={() => setPoseSource("telemetry")}
+            >
+              Live telemetry
+            </button>
+            <button
+              className={`btn ${poseSource === "manual" ? "primary" : ""}`}
+              style={{ flex: 1 }}
+              onClick={() => setPoseSource("manual")}
+            >
+              Manual
+            </button>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-            <label style={{ display: "flex", justifyContent: "space-between", fontSize: 13, cursor: "pointer" }}>
-              <span>3D Wireframe Mesh</span>
-              <input type="checkbox" checked={wireframe} onChange={(e) => setWireframe(e.target.checked)} />
-            </label>
-            <label style={{ display: "flex", justifyContent: "space-between", fontSize: 13, cursor: "pointer" }}>
-              <span>Joint Values List</span>
-              <input type="checkbox" checked={showJointsTable} onChange={(e) => setShowJointsTable(e.target.checked)} />
-            </label>
-            <label style={{ display: "flex", justifyContent: "space-between", fontSize: 13, cursor: "pointer" }}>
-              <span>Camera Stream PIP</span>
-              <input type="checkbox" checked={showCameraPip} onChange={(e) => setShowCameraPip(e.target.checked)} />
-            </label>
-          </div>
-
-          <hr style={{ borderColor: "var(--border)", margin: "12px 0" }} />
-
-          {showJointsTable && (
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--accent)" }}>
-                3D Joint Angle Telemetry ({activeJointsCount}/{totalJointsCount})
-              </div>
-
-              {/* Head Section */}
-              <div style={{ marginBottom: 12 }}>
-                <div className="muted" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>
-                  Head &amp; Neck ({headJoints.length})
-                </div>
-                {headJoints.map(([name, m]) => (
-                  <JointRow key={name} name={name} joint={m} />
-                ))}
-              </div>
-
-              {/* Left Leg Section */}
-              <div style={{ marginBottom: 12 }}>
-                <div className="muted" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>
-                  Left Leg ({leftLegJoints.length})
-                </div>
-                {leftLegJoints.map(([name, m]) => (
-                  <JointRow key={name} name={name} joint={m} />
-                ))}
-              </div>
-
-              {/* Right Leg Section */}
-              <div style={{ marginBottom: 12 }}>
-                <div className="muted" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>
-                  Right Leg ({rightLegJoints.length})
-                </div>
-                {rightLegJoints.map(([name, m]) => (
-                  <JointRow key={name} name={name} joint={m} />
-                ))}
-              </div>
-            </div>
+          {poseSource === "manual" && (
+            <button className="btn" style={{ width: "100%", marginBottom: 12 }} onClick={resetPose}>
+              Reset to zero pose
+            </button>
           )}
+
+          <SectionTitle>Display</SectionTitle>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+            <Toggle label="Visual geometry" checked={showVisual} onChange={setShowVisual} />
+            <Toggle label="Collision geometry" checked={showCollision} onChange={setShowCollision} />
+            <Toggle label="Wireframe" checked={wireframe} onChange={setWireframe} />
+            <Toggle label="Grid & world axes" checked={showGrid} onChange={setShowGrid} />
+            <Toggle label="Joint frames" checked={showFrames} onChange={setShowFrames} />
+            <Toggle label="Camera PIP" checked={showCameraPip} onChange={setShowCameraPip} />
+          </div>
+
+          <SectionTitle>Joints ({joints.length})</SectionTitle>
+          {!joints.length && <div className="muted" style={{ fontSize: 12 }}>Waiting for the model…</div>}
+          {groups.map((group) => (
+            <div key={group.title} style={{ marginBottom: 12 }}>
+              <div
+                className="muted"
+                style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}
+              >
+                {group.title} ({group.items.length})
+              </div>
+              {group.items.map((joint) => (
+                <JointSlider
+                  key={joint.name}
+                  joint={joint}
+                  driven={actuated.has(joint.name)}
+                  live={poseSource === "telemetry"}
+                  value={poseSource === "telemetry" ? liveValues[joint.name] ?? 0 : manualPose[joint.name] ?? 0}
+                  onChange={(v) => setJoint(joint.name, v)}
+                />
+              ))}
+            </div>
+          ))}
         </div>
 
-        {/* Right Panel — 3D WebGL Viewport or URDF Source XML */}
         <div
           className="panel"
-          style={{
-            position: "relative",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "#090d14",
-            overflow: "hidden",
-          }}
+          style={{ position: "relative", background: "#0b1018", overflow: "hidden", padding: 0 }}
         >
-          {mode === "3d" ? (
+          {tab === "3d" ? (
             <div style={{ width: "100%", height: "100%", position: "relative" }}>
-              {/* 3D WebGL Canvas */}
-              <canvas
-                ref={canvasRef}
-                style={{ width: "100%", height: "100%", display: "block", cursor: "grab" }}
-              />
+              <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
 
-              {/* Instruction Overlay */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 16,
-                  left: 16,
-                  background: "rgba(13, 18, 26, 0.8)",
-                  backdropFilter: "blur(6px)",
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  border: "1px solid var(--border)",
-                  fontSize: 11,
-                  color: "var(--muted)",
-                }}
-              >
-                🖱️ Drag mouse to orbit CAD STL duck model · Scroll to zoom
+              <div style={{ position: "absolute", top: 12, left: 12, display: "flex", gap: 6 }}>
+                {VIEWS.map((v) => (
+                  <button key={v.id} className="btn" onClick={() => sceneRef.current?.setView(v.id)}>
+                    {v.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Camera PIP Overlay */}
+              {stats && (
+                <div style={overlayStyle("top-right")}>
+                  <div>{stats.fps} fps</div>
+                  <div>{stats.meshes} meshes</div>
+                  <div>{stats.triangles.toLocaleString()} tris</div>
+                  <div>{(stats.height * 100).toFixed(1)} cm tall</div>
+                </div>
+              )}
+
+              <div style={overlayStyle("bottom-left")}>
+                Left-drag orbit · right-drag pan · scroll zoom · Z-up world
+              </div>
+
+              {model?.missing_meshes?.length ? (
+                <div style={{ ...overlayStyle("bottom-right"), color: "var(--danger)", maxWidth: 320 }}>
+                  {model.missing_meshes.length} mesh(es) missing from assets/. Run
+                  <code> python3 scripts/check_robot_assets.py</code>
+                </div>
+              ) : null}
+
               {showCameraPip && snapshot?.video?.running && (
                 <div
                   style={{
                     position: "absolute",
-                    top: 16,
-                    right: 16,
-                    width: 180,
+                    bottom: 12,
+                    right: 12,
+                    width: 190,
                     borderRadius: 8,
                     overflow: "hidden",
-                    border: "2px solid var(--accent)",
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+                    border: "1px solid var(--border)",
                     background: "#000",
                   }}
                 >
-                  <div style={{ background: "rgba(0,0,0,0.8)", padding: "2px 8px", fontSize: 10, color: "var(--accent)", fontWeight: 600 }}>
-                    LIVE CAMERA PIP
+                  <div style={{ padding: "2px 8px", fontSize: 10, color: "var(--accent)", fontWeight: 600 }}>
+                    LIVE CAMERA
                   </div>
                   <img
                     src={apiUrl("/stream/camera")}
-                    alt="pip"
+                    alt="camera"
                     style={{ width: "100%", height: 110, objectFit: "cover", display: "block" }}
                   />
                 </div>
@@ -469,8 +302,12 @@ export default function VizPage() {
             </div>
           ) : (
             <div style={{ width: "100%", height: "100%", padding: 16, overflowY: "auto" }}>
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: "var(--accent)" }}>
-                assets/robot.urdf Source XML
+              <div style={{ display: "flex", gap: 16, marginBottom: 10, flexWrap: "wrap" }}>
+                <Stat label="Links" value={model?.links?.length ?? "—"} />
+                <Stat label="Movable joints" value={model?.movable_joints?.length ?? "—"} />
+                <Stat label="Driven by servos" value={model?.actuated_joints?.length ?? "—"} />
+                <Stat label="Meshes" value={model?.mesh_count ?? "—"} />
+                <Stat label="Root link" value={model?.root_link ?? "—"} />
               </div>
               <pre
                 className="log-view"
@@ -479,10 +316,10 @@ export default function VizPage() {
                   padding: 16,
                   borderRadius: 8,
                   border: "1px solid var(--border)",
-                  maxHeight: "calc(100vh - 180px)",
+                  maxHeight: "calc(100vh - 220px)",
                 }}
               >
-                {loadingUrdf ? "Loading URDF definition from server…" : urdfXml || "No URDF file found."}
+                {urdfXml || "Loading assets/robot.urdf…"}
               </pre>
             </div>
           )}
@@ -492,40 +329,96 @@ export default function VizPage() {
   );
 }
 
-// Sub-component for individual joint rows
-function JointRow({ name, joint }: { name: string; joint: JointData }) {
-  const rad = joint?.position ?? 0;
-  const deg = (rad * (180 / Math.PI)).toFixed(1);
-
+function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "4px 6px",
-        fontSize: 12,
-        borderRadius: 4,
-        marginBottom: 2,
-        background: "rgba(255,255,255,0.03)",
-        border: "1px solid rgba(255,255,255,0.05)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: joint?.online !== false ? "var(--accent)" : "var(--danger)",
-          }}
-        />
-        <span style={{ fontFamily: "monospace", color: "var(--text)" }}>{name}</span>
+    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--accent)" }}>{children}</div>
+  );
+}
+
+function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label style={{ display: "flex", justifyContent: "space-between", fontSize: 13, cursor: "pointer" }}>
+      <span>{label}</span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div>
+      <div className="muted" style={{ fontSize: 11, textTransform: "uppercase" }}>
+        {label}
       </div>
-      <div style={{ textAlign: "right" }}>
-        <span style={{ fontWeight: 600, color: "var(--accent)" }}>{rad.toFixed(2)} rad</span>
-        <span className="muted" style={{ fontSize: 10, marginLeft: 6 }}>({deg}°)</span>
-      </div>
+      <div style={{ fontWeight: 600, fontSize: 15 }}>{value}</div>
     </div>
   );
+}
+
+function JointSlider({
+  joint,
+  value,
+  driven,
+  live,
+  onChange,
+}: {
+  joint: JointInfo;
+  value: number;
+  driven: boolean;
+  live: boolean;
+  onChange: (v: number) => void;
+}) {
+  const deg = (value * 180) / Math.PI;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            title={driven ? "Driven by a servo" : "No servo mapped — pose manually"}
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: driven ? "var(--accent)" : "var(--muted)",
+            }}
+          />
+          <span style={{ fontFamily: "monospace" }}>{joint.name}</span>
+        </span>
+        <span style={{ color: "var(--accent)", fontWeight: 600 }}>{deg.toFixed(1)}°</span>
+      </div>
+      <input
+        type="range"
+        min={joint.lower}
+        max={joint.upper}
+        step={0.005}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%", accentColor: live ? "var(--muted)" : "var(--accent)" }}
+      />
+    </div>
+  );
+}
+
+function overlayStyle(corner: "top-right" | "bottom-left" | "bottom-right"): React.CSSProperties {
+  const base: React.CSSProperties = {
+    position: "absolute",
+    background: "rgba(11, 16, 24, 0.82)",
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 11,
+    color: "var(--muted)",
+    lineHeight: 1.5,
+  };
+  if (corner === "top-right") return { ...base, top: 12, right: 12, textAlign: "right" };
+  if (corner === "bottom-left") return { ...base, bottom: 12, left: 12 };
+  return { ...base, bottom: 12, right: 12 };
 }

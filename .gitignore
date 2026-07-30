@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 configs/duck_config.json
 .DS_Store
 *.egg-info/

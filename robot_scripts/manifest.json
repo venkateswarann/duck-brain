@@ -1,15 +1,159 @@
 {
   "scripts": {
     "camera.py": {
-      "display_name": "Camera Stream Helper",
-      "description": "Example camera helper script (wrap Open Duck Mini camera later).",
-      "resources": ["camera0"],
+      "display_name": "USB Camera Stream",
+      "description": "Streams a USB or Pi camera to the Camera page (pick the source in the dropdown).",
+      "resources": [
+        "camera0"
+      ],
+      "depends_on": [],
+      "args": []
+    },
+    "cam_test.py": {
+      "display_name": "Camera Snapshot Test",
+      "description": "Grabs one picamzero frame and writes it to /home/bdxv2/aze.jpg \u2014 quick camera check.",
+      "resources": [
+        "camera0"
+      ],
       "depends_on": []
     },
-    "rl_walk.py": {
-      "display_name": "RL Walk",
-      "description": "Placeholder for Open Duck Mini Runtime v2_rl_walk — owns the servo serial bus.",
-      "resources": ["serial"],
+    "v2_rl_walk_mujoco.py": {
+      "display_name": "RL Walk (v2)",
+      "description": "Open Duck Mini RL walk policy on the real servos. Edit args below if the ONNX model lives elsewhere.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": [],
+      "args": [
+        "--onnx_model_path",
+        "/home/bdxv2/BEST_WALK_ONNX_2.onnx"
+      ]
+    },
+    "turn_on.py": {
+      "display_name": "Motors On",
+      "description": "Torque-enables every servo and holds the current position.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "turn_off.py": {
+      "display_name": "Motors Off",
+      "description": "Torque-disables every servo \u2014 the robot goes limp, so support it first.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "check_motors.py": {
+      "display_name": "Check Motors",
+      "description": "Pings every joint id and reports which servos answer on the bus.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "check_voltage.py": {
+      "display_name": "Check Voltage",
+      "description": "Prints per-servo bus voltage through pypot Feetech IO.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "check_volt_gui.py": {
+      "display_name": "Voltage GUI (NiceGUI)",
+      "description": "Serves its own NiceGUI page with live voltage plots \u2014 opens a separate web port.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "configure_motor.py": {
+      "display_name": "Configure One Motor",
+      "description": "Assigns an id to a brand new servo. Needs --id (and optionally --port).",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "configure_all_motors.py": {
+      "display_name": "Configure All Motors",
+      "description": "Writes the standard PID/limits to every joint id in one pass.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "find_soft_offsets.py": {
+      "display_name": "Find Soft Offsets",
+      "description": "Moves the robot to zero position to measure joint offsets \u2014 needs a keypress, hold the robot.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "head_puppet.py": {
+      "display_name": "Head Puppet (Xbox)",
+      "description": "Init pose, then drive the head with an Xbox controller.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "antennas_controller_test.py": {
+      "display_name": "Antennas Test (Xbox)",
+      "description": "Maps the Xbox triggers to the two antenna servos.",
+      "resources": [],
+      "depends_on": []
+    },
+    "calibrate_imu.py": {
+      "display_name": "Calibrate IMU",
+      "description": "Runs the BNO055 calibration routine and stores the result.",
+      "resources": [],
+      "depends_on": []
+    },
+    "imu_server.py": {
+      "display_name": "IMU Server",
+      "description": "Publishes IMU samples over TCP port 1234 for imu_client.py on a laptop.",
+      "resources": [],
+      "depends_on": []
+    },
+    "imu_client.py": {
+      "display_name": "IMU Client (viewer)",
+      "description": "Desktop-side viewer for imu_server.py \u2014 needs FramesViewer and a display.",
+      "resources": [],
+      "depends_on": []
+    },
+    "record_data.py": {
+      "display_name": "Record Motor Data",
+      "description": "Sweeps kp/kd/acceleration on one servo and pickles the response.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "new_record_data.py": {
+      "display_name": "Record Motor Data (new firmware)",
+      "description": "Same sweep as record_data.py with the --new_firmware load conversion.",
+      "resources": [
+        "serial"
+      ],
+      "depends_on": []
+    },
+    "plot_recorded_data.py": {
+      "display_name": "Plot Recorded Data",
+      "description": "Matplotlib plots of a recorded pickle \u2014 needs -f FILE and a display.",
+      "resources": [],
+      "depends_on": []
+    },
+    "fc_test.py": {
+      "display_name": "Function Calling Demo",
+      "description": "OpenAI function-calling loop driving walk + camera. Needs an API key and the ONNX model.",
+      "resources": [
+        "serial",
+        "camera0"
+      ],
       "depends_on": []
     }
   }

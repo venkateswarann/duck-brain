@@ -2,10 +2,52 @@ import { useState, useEffect } from "react";
 import { useTelemetry } from "../hooks/useTelemetry";
 import { apiUrl } from "../config";
 
+const CAMERA_NODE = "video.capture";
+
+type VideoSource = {
+  id: string;
+  label: string;
+  kind: "node" | "script";
+  live: boolean;
+  fps: number;
+  width: number;
+  height: number;
+  publisher: string;
+};
+
 export default function CameraPage() {
   const { snapshot } = useTelemetry();
-  const running = snapshot?.video?.running === true;
-  const nodeState = snapshot?.nodes?.["video.capture"];
+  const nodeState = snapshot?.nodes?.[CAMERA_NODE];
+
+  const [sources, setSources] = useState<VideoSource[]>([]);
+  const [source, setSource] = useState<string>(CAMERA_NODE);
+  // Bumped to force the <img> to reconnect when a stream ends or is switched.
+  const [streamKey, setStreamKey] = useState(0);
+
+  useEffect(() => {
+    const poll = () =>
+      fetch(apiUrl("/api/video/streams"))
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data: VideoSource[]) => setSources(Array.isArray(data) ? data : []))
+        .catch(() => undefined);
+    poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const active = sources.find((s) => s.id === source);
+  const isCameraNode = source === CAMERA_NODE;
+  const running = isCameraNode ? snapshot?.video?.running === true : Boolean(active?.live);
+
+  // A script stream disappears when its publisher stops; fall back to the camera.
+  useEffect(() => {
+    if (!sources.length || isCameraNode) return;
+    if (!sources.some((s) => s.id === source)) setSource(CAMERA_NODE);
+  }, [sources, source, isCameraNode]);
+
+  useEffect(() => {
+    setStreamKey((key) => key + 1);
+  }, [source, running]);
 
   const [rotation, setRotation] = useState<number>(180); // Default 180 for inverted setup
   const [flipH, setFlipH] = useState<boolean>(false);
@@ -34,6 +76,13 @@ export default function CameraPage() {
   }, []);
 
   const applyConfig = async (newRotation: number, newFlipH: boolean, newFlipV: boolean, newSwapRb: boolean, newRes: string, newFps: number) => {
+    // Script streams are transformed in the browser only; the node config below
+    // belongs to video.capture.
+    if (!isCameraNode) {
+      setStatusMsg("Applied locally (script stream)");
+      setTimeout(() => setStatusMsg(""), 3000);
+      return;
+    }
     setSaving(true);
     setStatusMsg("");
     const [w, h] = newRes.split("x").map(Number);
@@ -105,9 +154,12 @@ export default function CameraPage() {
       <div className="page-title">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span>Camera Stream</span>
-          <span className={`status-dot status-${nodeState || "stopped"}`} />
+          <span className={`status-dot status-${running ? "running" : "stopped"}`} />
           <span className="muted" style={{ fontSize: 13 }}>
-            video.capture: {nodeState ?? "—"} · {running ? "LIVE" : "OFFLINE"}
+            {isCameraNode
+              ? `video.capture: ${nodeState ?? "—"}`
+              : `${active?.publisher || "script"} @ ${active?.fps ?? 0} fps`}{" "}
+            · {running ? "LIVE" : "OFFLINE"}
           </span>
         </div>
         {statusMsg && (
@@ -127,6 +179,41 @@ export default function CameraPage() {
           borderBottom: "1px solid var(--border)",
         }}
       >
+        {/* Source */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span className="muted" style={{ fontSize: 12 }}>Source:</span>
+          <select
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+            style={{
+              background: "#121820",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "4px 8px",
+              fontSize: 12,
+            }}
+          >
+            {sources.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+                {s.kind === "script" ? " (script)" : ""}
+                {s.live ? "" : " — offline"}
+              </option>
+            ))}
+            {!sources.some((s) => s.id === source) && (
+              <option value={source}>{source}</option>
+            )}
+          </select>
+          <button
+            className="btn"
+            style={{ padding: "4px 8px", fontSize: 12 }}
+            onClick={() => setStreamKey((key) => key + 1)}
+            title="Reconnect the stream"
+          >
+            Reload
+          </button>
+        </div>
+
         {/* Rotation */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span className="muted" style={{ fontSize: 12 }}>Rotation:</span>
@@ -173,6 +260,7 @@ export default function CameraPage() {
           <span className="muted" style={{ fontSize: 12 }}>Resolution:</span>
           <select
             value={resolution}
+            disabled={!isCameraNode}
             onChange={(e) => handleResChange(e.target.value)}
             style={{
               background: "#121820",
@@ -195,8 +283,9 @@ export default function CameraPage() {
           {[5, 10, 15, 20, 30].map((f) => (
             <button
               key={f}
-              className={`btn ${fps === f ? "primary" : ""}`}
+              className={`btn ${isCameraNode && fps === f ? "primary" : ""}`}
               style={{ padding: "4px 8px", fontSize: 12 }}
+              disabled={!isCameraNode}
               onClick={() => handleFpsChange(f)}
             >
               {f}
@@ -230,8 +319,9 @@ export default function CameraPage() {
             }}
           >
             <img
-              src={apiUrl("/stream/camera")}
-              alt="Live Open Duck Camera"
+              key={streamKey}
+              src={apiUrl(`/stream/video/${encodeURIComponent(source)}?t=${streamKey}`)}
+              alt={active?.label || "Live camera"}
               style={{
                 maxWidth: "100%",
                 maxHeight: "75vh",
@@ -271,17 +361,30 @@ export default function CameraPage() {
               📹
             </div>
             <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>
-              Camera Stream Offline
+              {isCameraNode ? "Camera Stream Offline" : "Script Stream Offline"}
             </div>
             <div className="muted" style={{ fontSize: 13, marginBottom: 20 }}>
-              The <code>video.capture</code> node is currently not running. Start or restart it on the System / Nodes page.
+              {isCameraNode ? (
+                <>
+                  The <code>video.capture</code> node is currently not running. Start it here or
+                  on the System / Nodes page.
+                </>
+              ) : (
+                <>
+                  No frames are arriving on <code>{source}</code>. Start the publishing script on
+                  the Scripts page — any script can push frames here with{" "}
+                  <code>dcs_sdk.VideoStream</code>.
+                </>
+              )}
             </div>
-            <button
-              className="btn primary"
-              onClick={() => fetch(apiUrl("/api/nodes/video.capture/start"), { method: "POST" })}
-            >
-              Start Camera Node
-            </button>
+            {isCameraNode && (
+              <button
+                className="btn primary"
+                onClick={() => fetch(apiUrl("/api/nodes/video.capture/start"), { method: "POST" })}
+              >
+                Start Camera Node
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -11,11 +11,11 @@ Servo API target: [python-st3215](https://github.com/Mickael-Roger/python-st3215
 
 ## Architecture (nodes)
 
-Every capability is a **Node** (`motors.telemetry`, `video.capture`, `script.rl_walk`, …).
+Every capability is a **Node** (`motors.telemetry`, `video.capture`, `script.v2_rl_walk_mujoco`, …).
 
 - **System → Nodes**: start / stop / restart / **kill** with CPU, logs, config (Tritium-style).
 - Kill `video.capture` → `/stream/camera` stops immediately.
-- Run `rl_walk.py` (serial lock) → motors telemetry yields the bus; stopping walk auto-resumes motors.
+- Run `v2_rl_walk_mujoco.py` (serial lock) → motors telemetry yields the bus; stopping walk auto-resumes motors.
 
 ```text
 Browser (Vite React)
@@ -25,7 +25,8 @@ FastAPI NodeRuntime
     ├─ MotorsTelemetry (ST3215 or mock)
     ├─ VideoCapture (OpenCV or mock JPEG)
     ├─ SystemMetrics (psutil)
-    └─ ScriptNodes (robot_scripts/*.py)
+    ├─ FrameHub (video published by scripts)
+    └─ ScriptNodes (robot_scripts/**/*.py, spawned subprocesses)
 ```
 
 ## Quick start (localhost)
@@ -37,7 +38,25 @@ cd /home/venki/repos/embedded/DCS
 ./scripts/setup.sh -y --hardware --serial /dev/ttyACM0
 ```
 
-Then start backend + frontend (printed by the script), open **http://127.0.0.1:5173/help** for the parameter guide and live config editor.
+Then launch both services with one command:
+
+```bash
+./scripts/run.sh
+```
+
+This starts the FastAPI backend on `:8000`, waits for it to answer `/api/health`, then starts the Vite dev server on `:5173`. Output from both is prefixed `[backend]` / `[frontend]`, and **Ctrl+C stops both**. If either service dies, the other is shut down too.
+
+| Flag | Effect |
+|------|--------|
+| `--reload` | Run uvicorn with auto-reload for development |
+| `--backend-only` | Backend only (same as `./scripts/run_backend.sh`) |
+| `--frontend-only` | Frontend only, proxying to an already-running backend |
+| `--host` / `--port` | Backend bind address and port |
+| `--frontend-port` | Vite dev server port |
+
+The launcher passes the backend location to Vite through `DCS_BACKEND_HOST` / `DCS_BACKEND_PORT`, so `--port` keeps the `/api`, `/ws` and `/stream` proxies pointed at the right place.
+
+Open **http://127.0.0.1:5173/help** for the parameter guide and live config editor.
 
 ### Backend (manual)
 
@@ -61,7 +80,7 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5173 — Vite proxies `/api`, `/ws`, `/stream` to port 8000.
+Open http://127.0.0.1:5173 — Vite proxies `/api`, `/ws`, `/stream` to port 8000 (override with `DCS_BACKEND_PORT`).
 
 Remote later: set `VITE_API_BASE` / `VITE_WS_URL` to your host (e.g. `https://…` / `wss://…`).
 
@@ -71,20 +90,121 @@ Remote later: set `VITE_API_BASE` / `VITE_WS_URL` to your host (e.g. `https://�
 |------|--------|
 | System / Nodes | Live lifecycle + logs |
 | Devices | Motor range bars from duck_config limits |
-| Scripts | Monaco edit / save / run / stop |
-| Camera | MJPEG bound to `video.capture` node |
-| Viz | Tree + live joint overlay (URDF mesh later) |
+| Scripts | `robot_scripts/` file tree, templates, edit / run / stop with live logs |
+| Camera | MJPEG from `video.capture` or any script-published stream |
+| Viz | URDF robot in 3D, MuJoCo-style: joint sliders, collision overlay, live pose |
 | Board Pins | Interactive RPi5 / Jetson Orin NX pinout + import/export |
 | Control | Key map from config |
 | Host | RAM / disk / IPs / processes |
-| Terminal / SSH | UI stubs; SSH profiles in localStorage |
+| Terminal | Real local shell over a PTY (off by default) |
+| Connections → SSH | Real SSH shell in the browser via xterm.js + paramiko |
 
-## Wire real Open Duck Mini scripts
+## 3D model (Viz page)
 
-Replace placeholders in `robot_scripts/` with wrappers that call Runtime entrypoints, e.g. `v2_rl_walk_mujoco.py`, and keep `manifest.json` `resources: ["serial"]` for walk.
+The viewer loads `assets/robot.urdf` plus its 45 STL meshes and assembles them with
+the URDF kinematic tree, so it behaves like a MuJoCo / RViz viewport: **Z-up** world,
+orbit / pan / zoom, a ground grid the duck stands on, visual and collision geometry,
+joint frames, and view presets. Joints follow live servo telemetry, or you can switch
+to **Manual** and pose all 16 with sliders clamped to the URDF limits.
 
-URDF reference: `Open_Duck_Mini/mini_bdx/robots/open_duck_mini_v2/robot.urdf`.
+Assets come from the upstream robot description:
+
+```bash
+./scripts/setup.sh --robot-assets <Open_Duck_Mini>/mini_bdx/robots/open_duck_mini_v2
+```
+
+> **Do not copy the meshes from `Open_Duck_Mini/print/`.** Those files have the same
+> names but are modelled in **millimetres** for 3D printing, while the URDF's joint
+> origins are in **metres**. Mixing them makes the viewer draw a 1000x oversized,
+> disassembled robot. Scaling the model in the viewer does not fix it — that shrinks
+> the joint offsets too, collapsing the parts into each other.
+
+Validate the description at any time:
+
+```bash
+python3 scripts/check_robot_assets.py
+```
+
+It checks that every referenced mesh exists, that mesh units match the URDF, that the
+link tree is fully connected, and that the assembled robot is a plausible ~42 cm duck.
+
+## Scripts
+
+The Scripts page is a file browser over `robot_scripts/`, subfolders included. Drop a whole
+project in there (`scp -r`, `git clone`) and it shows up in the tree. Python files can be
+edited (Ctrl+S saves), run and stopped; every other file is listed so the structure is visible.
+
+Creating a script asks for a folder, a name, a starter template and the hardware locks it
+needs. Templates cover a blank skeleton, a SIGTERM-aware loop, a USB camera publisher, a
+motors/serial reader and an IMU reader.
+
+**Running.** Each script runs as its own node: `robot_scripts/tools/scan.py` becomes
+`script.tools.scan`, so its stdout/stderr stream into the log panel and the System / Nodes
+page. Scripts are spawned with `robot_scripts/` and each embedded package checkout on
+`PYTHONPATH`, so `from mini_bdx_runtime.rustypot_position_hwi import HWI` resolves the same
+way it does on the robot. Stop sends `SIGTERM` (then `SIGKILL` after ~3 s), so a
+`signal.signal(signal.SIGTERM, ...)` handler gets to clean up — and its final output is
+captured.
+
+**`manifest.json`** holds the per-script metadata the UI shows: `display_name`,
+`description`, `resources` (`serial`, `camera0` — these are real exclusive locks, so starting
+a `serial` script pauses `motors.telemetry`) and optional `args` passed on the command line.
+Scripts without an entry fall back to their module docstring for the description, and get a
+node created on demand the first time you run them.
+
+### Publishing video from a script
+
+`robot_scripts/dcs_sdk.py` is standard library only, so a script that uses it still runs when
+you launch it by hand over SSH:
+
+```python
+from dcs_sdk import VideoStream
+
+cam = VideoStream("usb_cam", label="USB Camera", fps=15)
+while running:
+    ok, frame = capture.read()
+    cam.publish_frame(frame)      # numpy BGR (encoded with cv2)
+    cam.wait_for_next_frame()
+```
+
+Frames are POSTed to `/api/video/ingest/{stream_id}` and served back as MJPEG on
+`/stream/video/{stream_id}`; the stream appears in the Camera page **Source** dropdown while
+frames keep arriving and disappears ~10 s after the script stops. `robot_scripts/camera.py`
+is a complete working example:
+
+```bash
+python3 camera.py --device 0 --width 640 --height 480 --fps 15
+```
+
+`DCS_API_URL`, `DCS_STREAM_ID` and `DCS_NODE_ID` are exported to every script DCS starts;
+outside DCS the SDK falls back to `http://127.0.0.1:8000`.
+
+## Terminals
+
+Both terminals are real [xterm.js](https://xtermjs.org/) emulators talking to a backend PTY over a
+WebSocket, so escape sequences, scrollback, selection, resize and full-screen programs
+(`htop`, `vim`, `less`) all behave as in a native terminal.
+
+**SSH (Connections → SSH)** opens a genuine remote shell through paramiko. Host, port and
+username are saved in browser local storage; **passwords and private keys are never stored** —
+you are prompted for them each time you connect, and they are held only for the life of that
+socket. Pasted hosts are normalised, so `ssh://10.9.9.45/` and `venki@10.9.9.45:22` both work.
+
+**Local (Terminal page)** is a shell on the machine running the backend. It is off unless *both*
+of these are set, because it needs no credentials and would otherwise hand a shell to anyone who
+can reach the port:
+
+```bash
+# 1. configs/duck_config.json
+"allow_web_terminal": true
+# 2. backend environment
+ALLOW_WEB_TERMINAL=1 ./scripts/run.sh
+```
+
+`GET /api/terminal/capabilities` reports whether each one is usable and why not.
 
 ## Security
 
-Script runner / terminal / SSH proxy are powerful. Keep them localhost or behind Tailscale; terminal stays off until `allow_web_terminal` + env flag.
+Script runner, terminal and SSH are powerful. Keep them on localhost or behind Tailscale.
+The local terminal stays off until `allow_web_terminal` + `ALLOW_WEB_TERMINAL=1`; SSH requires
+credentials on every connect and stores none.

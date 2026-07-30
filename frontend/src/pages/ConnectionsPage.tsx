@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { apiUrl } from "../config";
+import { apiUrl, wsUrl } from "../config";
+import WebTerminal, { type TerminalState } from "../components/WebTerminal";
 
 type Tab = "bluetooth" | "network" | "ssh";
 
@@ -434,16 +435,42 @@ function genId() {
   return "ssh-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2, 9);
 }
 
+/** Trim things people paste by habit: schemes, trailing slashes, user@ prefixes. */
+function cleanHost(raw: string): string {
+  let host = raw.trim();
+  for (const prefix of ["ssh://", "http://", "https://"]) {
+    if (host.toLowerCase().startsWith(prefix)) host = host.slice(prefix.length);
+  }
+  host = host.replace(/\/+$/, "").trim();
+  if (host.includes("@")) host = host.slice(host.lastIndexOf("@") + 1);
+  return host;
+}
+
 function SshPanel() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
   const [draft, setDraft] = useState<Profile>({
     id: genId(),
-    host: "192.168.1.25",
+    host: "",
     port: 22,
-    user: "bdxmini",
+    user: "",
     auth: "password",
   });
+
+  // Pending connection: waiting for the secret before opening the socket.
+  const [pending, setPending] = useState<Profile | null>(null);
+  const [password, setPassword] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+
+  const [session, setSession] = useState<{
+    profile: Profile;
+    credentials: Record<string, unknown>;
+    key: number;
+  } | null>(null);
+  const [state, setState] = useState<TerminalState>("connecting");
+  const [message, setMessage] = useState("");
+  const [available, setAvailable] = useState<boolean | null>(null);
+  const [availableHint, setAvailableHint] = useState("");
 
   useEffect(() => {
     try {
@@ -457,6 +484,17 @@ function SshPanel() {
     }
   }, []);
 
+  useEffect(() => {
+    fetch(apiUrl("/api/terminal/capabilities"))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => {
+        if (!c) return;
+        setAvailable(Boolean(c.ssh?.available));
+        setAvailableHint(c.ssh?.hint || "");
+      })
+      .catch(() => setAvailable(null));
+  }, []);
+
   const persist = (next: Profile[]) => {
     setProfiles(next);
     try {
@@ -466,21 +504,73 @@ function SshPanel() {
     }
   };
 
+  const beginConnect = (profile: Profile) => {
+    setSession(null);
+    setPassword("");
+    setPrivateKey("");
+    setPassphrase("");
+    setPending(profile);
+  };
+
+  const openSession = () => {
+    if (!pending) return;
+    const credentials: Record<string, unknown> =
+      pending.auth === "password"
+        ? { password }
+        : { private_key: privateKey, passphrase: passphrase || undefined };
+
+    setSession({
+      profile: pending,
+      credentials: {
+        host: cleanHost(pending.host),
+        port: pending.port,
+        username: pending.user,
+        ...credentials,
+      },
+      key: Date.now(),
+    });
+    setState("connecting");
+    setMessage("");
+    setPending(null);
+    // Don't keep the secret in React state any longer than needed; the socket
+    // payload already holds what it needs for this session.
+    setPassword("");
+    setPrivateKey("");
+    setPassphrase("");
+  };
+
+  const canSave = cleanHost(draft.host).length > 0 && draft.user.trim().length > 0;
+
   return (
-    <div style={{ padding: 16, display: "grid", gap: 20, maxWidth: 780 }}>
-      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 16 }}>
-        <h4 style={{ marginTop: 0, marginBottom: 8, color: "var(--accent)" }}>SSH Profiles &amp; Quick Terminal</h4>
+    <div style={{ padding: 16, display: "grid", gap: 20 }}>
+      {available === false && (
+        <div className="placeholder" style={{ color: "var(--danger)" }}>
+          SSH support is unavailable on the backend. {availableHint}
+        </div>
+      )}
+
+      <div
+        style={{
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          padding: 16,
+          maxWidth: 780,
+        }}
+      >
+        <h4 style={{ marginTop: 0, marginBottom: 8, color: "var(--accent)" }}>SSH Profiles</h4>
         <p className="muted" style={{ margin: "0 0 12px 0", fontSize: 13 }}>
-          Saved in browser local storage. Connect to run remote terminal commands on your robot.
+          Host, port and username are saved in browser local storage. Passwords and keys are never
+          stored — you are asked for them each time you connect.
         </p>
 
         <div className="kv" style={{ padding: 0, marginBottom: 14 }}>
-          <div className="k">Host IP</div>
+          <div className="k">Host</div>
           <input
             className="btn"
             value={draft.host}
             onChange={(e) => setDraft({ ...draft, host: e.target.value })}
-            placeholder="192.168.1.25"
+            placeholder="10.9.9.45"
           />
           <div className="k">Port</div>
           <input
@@ -494,33 +584,39 @@ function SshPanel() {
             className="btn"
             value={draft.user}
             onChange={(e) => setDraft({ ...draft, user: e.target.value })}
-            placeholder="bdxmini"
+            placeholder="venki"
           />
-          <div className="k">Auth Method</div>
+          <div className="k">Auth method</div>
           <select
             className="btn"
             value={draft.auth}
-            onChange={(e) =>
-              setDraft({ ...draft, auth: e.target.value as Profile["auth"] })
-            }
+            onChange={(e) => setDraft({ ...draft, auth: e.target.value as Profile["auth"] })}
           >
             <option value="password">Password</option>
-            <option value="key">SSH Public Key</option>
+            <option value="key">Private key</option>
           </select>
         </div>
 
         <button
           className="btn primary"
+          disabled={!canSave}
           onClick={() => {
-            persist([...profiles, { ...draft, id: genId() }]);
+            const profile = { ...draft, host: cleanHost(draft.host), id: genId() };
+            persist([...profiles, profile]);
+            setDraft({ id: genId(), host: "", port: 22, user: "", auth: draft.auth });
           }}
         >
-          + Save SSH Profile
+          + Save profile
         </button>
+        {!canSave && (
+          <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+            Host and username are required.
+          </span>
+        )}
       </div>
 
-      <div>
-        <h4 style={{ marginTop: 0, marginBottom: 8 }}>Saved SSH Targets</h4>
+      <div style={{ maxWidth: 780 }}>
+        <h4 style={{ marginTop: 0, marginBottom: 8 }}>Saved targets</h4>
         <table className="table">
           <thead>
             <tr>
@@ -537,19 +633,17 @@ function SshPanel() {
                   <strong>{p.user}</strong>@{p.host}
                 </td>
                 <td>{p.port}</td>
-                <td>{p.auth}</td>
+                <td>{p.auth === "password" ? "Password" : "Private key"}</td>
                 <td>
                   <div className="btn-row">
-                    <button
-                      className="btn primary"
-                      onClick={() => setActiveProfile(p)}
-                    >
+                    <button className="btn primary" onClick={() => beginConnect(p)}>
                       Connect
                     </button>
                     <button
                       className="btn danger"
                       onClick={() => {
-                        if (activeProfile?.id === p.id) setActiveProfile(null);
+                        if (session?.profile.id === p.id) setSession(null);
+                        if (pending?.id === p.id) setPending(null);
                         persist(profiles.filter((x) => x.id !== p.id));
                       }}
                     >
@@ -570,52 +664,144 @@ function SshPanel() {
         </table>
       </div>
 
-      {activeProfile && (
-        <div style={{ background: "#0b0e14", border: "1px solid var(--accent-dim)", borderRadius: 8, padding: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <span style={{ fontWeight: 600, color: "var(--accent)" }}>
-              SSH Terminal: {activeProfile.user}@{activeProfile.host}:{activeProfile.port}
-            </span>
-            <button className="btn danger" onClick={() => setActiveProfile(null)}>
-              Close Terminal
+      {pending && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            openSession();
+          }}
+          style={{
+            background: "var(--bg-panel)",
+            border: "1px solid var(--accent)",
+            borderRadius: 8,
+            padding: 16,
+            maxWidth: 780,
+          }}
+        >
+          <h4 style={{ marginTop: 0, marginBottom: 10, color: "var(--accent)" }}>
+            Authenticate — {pending.user}@{cleanHost(pending.host)}:{pending.port}
+          </h4>
+
+          {pending.auth === "password" ? (
+            <label style={{ display: "block", fontSize: 13 }}>
+              <div className="muted" style={{ marginBottom: 4 }}>
+                Password for {pending.user}
+              </div>
+              <input
+                className="btn"
+                type="password"
+                autoFocus
+                autoComplete="off"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{ width: "100%", maxWidth: 360 }}
+              />
+            </label>
+          ) : (
+            <>
+              <label style={{ display: "block", fontSize: 13, marginBottom: 10 }}>
+                <div className="muted" style={{ marginBottom: 4 }}>
+                  Private key (paste the contents of e.g. ~/.ssh/id_ed25519)
+                </div>
+                <textarea
+                  className="btn"
+                  autoFocus
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                  rows={6}
+                  spellCheck={false}
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
+                />
+              </label>
+              <label style={{ display: "block", fontSize: 13 }}>
+                <div className="muted" style={{ marginBottom: 4 }}>
+                  Key passphrase (leave blank if unencrypted)
+                </div>
+                <input
+                  className="btn"
+                  type="password"
+                  autoComplete="off"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  style={{ width: "100%", maxWidth: 360 }}
+                />
+              </label>
+            </>
+          )}
+
+          <div className="btn-row" style={{ marginTop: 14 }}>
+            <button className="btn primary" type="submit">
+              Connect
+            </button>
+            <button className="btn" type="button" onClick={() => setPending(null)}>
+              Cancel
             </button>
           </div>
+        </form>
+      )}
+
+      {session && (
+        <div
+          style={{
+            background: "#05080c",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            overflow: "hidden",
+          }}
+        >
           <div
             style={{
-              fontFamily: "monospace",
-              background: "#05080c",
-              padding: 12,
-              borderRadius: 6,
-              fontSize: 13,
-              color: "#a0e0b0",
-              minHeight: 120,
-              lineHeight: 1.5,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--bg-panel)",
             }}
           >
-            <div>$ ssh {activeProfile.user}@{activeProfile.host} -p {activeProfile.port}</div>
-            <div className="muted" style={{ marginTop: 6 }}>
-              Connected to {activeProfile.host}. Interactive PTY terminal is ready. Use the <strong>Term</strong> page or shell below:
-            </div>
-            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-              <span style={{ color: "var(--accent)" }}>bdxmini@{activeProfile.host}:~$</span>
-              <input
-                type="text"
-                placeholder="Type command (e.g. htop, ls, uptime)..."
+            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span
                 style={{
-                  flex: 1,
-                  background: "transparent",
-                  border: "none",
-                  outline: "none",
-                  color: "#fff",
-                  fontFamily: "monospace",
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    alert(`Command execution triggered for ${activeProfile.user}@${activeProfile.host}`);
-                  }
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background:
+                    state === "connected"
+                      ? "var(--accent)"
+                      : state === "error"
+                        ? "var(--danger)"
+                        : "var(--muted)",
                 }}
               />
+              <strong>
+                {session.profile.user}@{cleanHost(session.profile.host)}:{session.profile.port}
+              </strong>
+              <span className="muted">{message || state}</span>
+            </span>
+            <div className="btn-row">
+              <button
+                className="btn"
+                onClick={() => setSession({ ...session, key: Date.now() })}
+                title="Close and reopen the shell"
+              >
+                Reconnect
+              </button>
+              <button className="btn danger" onClick={() => setSession(null)}>
+                Disconnect
+              </button>
             </div>
+          </div>
+          <div style={{ height: 460, padding: 8 }}>
+            <WebTerminal
+              url={wsUrl("/ws/ssh")}
+              connect={session.credentials}
+              sessionKey={session.key}
+              onState={(s, m) => {
+                setState(s);
+                setMessage(m);
+              }}
+            />
           </div>
         </div>
       )}

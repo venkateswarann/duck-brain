@@ -127,8 +127,11 @@ PARAMETER_HELP: list[dict[str, Any]] = [
         "group": "Security",
         "type": "bool",
         "default": True,
-        "summary": "Allow Scripts page Save/Run (arbitrary Python as backend user).",
-        "details": "Disable on untrusted networks. Running scripts can take serial/camera locks.",
+        "summary": "Allow Scripts page edits, creation and Run (arbitrary Python as backend user).",
+        "details": (
+            "Disable on untrusted networks: it also blocks creating, renaming and deleting files "
+            "under robot_scripts/. Running scripts can take serial/camera locks."
+        ),
     },
     {
         "key": "allow_web_terminal",
@@ -154,12 +157,31 @@ PAGE_GUIDE: list[dict[str, str]] = [
     {
         "page": "Scripts",
         "path": "/scripts",
-        "blurb": "Edit and run robot_scripts/*.py. rl_walk owns serial; camera helper is a sample node.",
+        "blurb": (
+            "Browse robot_scripts/ as a folder tree, create scripts from templates, rename, "
+            "delete, edit (Ctrl+S saves) and run them with live stdout/stderr. Each script runs "
+            "as its own node, taking the serial/camera locks listed in robot_scripts/manifest.json. "
+            "Import dcs_sdk in a script to publish video to the Camera page."
+        ),
     },
     {
         "page": "Camera",
         "path": "/camera",
-        "blurb": "MJPEG viewer bound to video.capture. Offline when that node is killed.",
+        "blurb": (
+            "MJPEG viewer with a Source dropdown: the built-in video.capture node or any script "
+            "publishing frames through dcs_sdk.VideoStream. Rotation/flip apply in the browser; "
+            "resolution and FPS configure video.capture."
+        ),
+    },
+    {
+        "page": "Viz (3D model)",
+        "path": "/viz",
+        "blurb": (
+            "URDF robot in a MuJoCo-style Z-up viewport: orbit/pan/zoom, visual and collision "
+            "geometry, joint frames, view presets. Joints follow live telemetry, or switch to "
+            "Manual to pose all 16 within their URDF limits. Needs assets/robot.urdf + meshes; "
+            "verify with: python3 scripts/check_robot_assets.py"
+        ),
     },
     {
         "page": "Board Pins",
@@ -169,7 +191,19 @@ PAGE_GUIDE: list[dict[str, str]] = [
     {
         "page": "Connections",
         "path": "/connections",
-        "blurb": "Bluetooth scan/pair (Xbox), Network interfaces/Wi‑Fi/DNS/routes, SSH profiles.",
+        "blurb": (
+            "Bluetooth scan/pair (Xbox), Network interfaces/Wi‑Fi/DNS/routes, and a real SSH "
+            "terminal. Host/port/user are saved locally; the password or key is asked for on "
+            "every connect and never stored."
+        ),
+    },
+    {
+        "page": "Terminal",
+        "path": "/terminal",
+        "blurb": (
+            "Shell on the backend machine. Needs allow_web_terminal=true plus ALLOW_WEB_TERMINAL=1 "
+            "because it requires no credentials. For remote hosts use Connections → SSH."
+        ),
     },
     {
         "page": "Help / Setup",
@@ -184,19 +218,15 @@ SETUP_STEPS: list[dict[str, str]] = [
         "body": "./scripts/setup.sh   # or: ./scripts/setup.sh -y --hardware --serial /dev/ttyACM0",
     },
     {
-        "title": "2. Start backend",
-        "body": "cd backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000",
+        "title": "2. Launch backend + frontend",
+        "body": "./scripts/run.sh  →  http://127.0.0.1:5173 (Ctrl+C stops both). Add --reload for auto-reload, or --backend-only / --frontend-only to run one side.",
     },
     {
-        "title": "3. Start frontend",
-        "body": "cd frontend && npm run dev  →  http://127.0.0.1:5173",
-    },
-    {
-        "title": "4. Configure in UI",
+        "title": "3. Configure in UI",
         "body": "Open Help / Setup, adjust robot id, serial, mock mode, poll rate, save. Restart motors node if you flipped mock_hardware.",
     },
     {
-        "title": "5. On the robot",
+        "title": "4. On the robot",
         "body": "mock_hardware=false, install st3215, udev latency for USB serial (see Open Duck Mini Runtime README).",
     },
 ]

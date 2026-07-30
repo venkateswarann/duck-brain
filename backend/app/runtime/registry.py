@@ -17,6 +17,18 @@ class NodeRegistry:
     def register(self, node: Node) -> None:
         self._nodes[node.id] = node
 
+    async def unregister(self, node_id: str) -> bool:
+        """Drop a node (used when its script is deleted or renamed)."""
+        node = self._nodes.pop(node_id, None)
+        if node is None:
+            return False
+        try:
+            await node.kill()
+        except Exception:  # noqa: BLE001
+            pass
+        self.locks.release(node_id)
+        return True
+
     def get(self, node_id: str) -> Node:
         if node_id not in self._nodes:
             raise KeyError(node_id)

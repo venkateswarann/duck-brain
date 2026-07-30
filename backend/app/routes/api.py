@@ -3,12 +3,19 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Callable, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 
-from ..config_loader import ASSETS_DIR, ROOT, SCRIPTS_DIR, load_script_manifest, save_json
-from ..nodes.script_node import ScriptNode, discover_script_nodes
+from ..config_loader import ASSETS_DIR, SCRIPTS_DIR, save_json
+from ..nodes.script_node import make_script_node
+from ..runtime.locks import ResourceBusyError
+from ..services import script_fs
+from ..services.script_templates import list_templates as list_script_templates
+from ..services.script_templates import render as render_script_template
+from ..services.script_templates import template_resources
+from .video import stream_video
 
 router = APIRouter(tags=["api"])
 
@@ -71,62 +78,116 @@ async def put_config(request: Request):
 
 @router.get("/api/robot/urdf")
 async def get_robot_urdf():
-    candidates = [
-        ASSETS_DIR / "robot.urdf",
-        ROOT / "assets" / "robot.urdf",
-        Path.cwd() / "assets" / "robot.urdf",
-        Path.cwd().parent / "assets" / "robot.urdf",
-        Path(__file__).resolve().parents[2] / "assets" / "robot.urdf",
-        Path(__file__).resolve().parents[3] / "assets" / "robot.urdf",
-    ]
-    for candidate in candidates:
-        if candidate.exists() and candidate.is_file():
-            return Response(content=candidate.read_text(encoding="utf-8"), media_type="application/xml")
-
-    # Recursive fallback search across root parent directories
-    search_root = ROOT if ROOT.exists() else Path.cwd()
-    if search_root.parent.exists():
-        search_root = search_root.parent
-    try:
-        for p in search_root.rglob("robot.urdf"):
-            if p.is_file():
-                return Response(content=p.read_text(encoding="utf-8"), media_type="application/xml")
-    except Exception:  # noqa: BLE001
-        pass
-
-    raise HTTPException(404, "URDF file 'robot.urdf' not found on system")
+    urdf = ASSETS_DIR / "robot.urdf"
+    if not urdf.is_file():
+        raise HTTPException(
+            404,
+            f"robot.urdf not found in {ASSETS_DIR}. Copy the robot description from "
+            "Open_Duck_Mini/mini_bdx/robots/open_duck_mini_v2/.",
+        )
+    return Response(content=urdf.read_text(encoding="utf-8"), media_type="application/xml")
 
 
 @router.get("/api/robot/assets/{filename}")
 async def get_robot_asset(filename: str):
+    """Serve a mesh referenced by the URDF.
+
+    Deliberately limited to assets/: the meshes under Open_Duck_Mini/print/ share
+    the same names but are modelled in millimetres, and serving those makes the
+    viewer render a 1000x oversized, disassembled robot.
+    """
     if ".." in filename or "/" in filename or "\\" in filename:
         raise HTTPException(400, "Invalid filename")
 
-    clean_name = filename.lower().strip()
+    path = ASSETS_DIR / filename
+    if not path.is_file():
+        # Meshes are referenced with the case used by the CAD export; be forgiving.
+        match = next(
+            (p for p in ASSETS_DIR.glob("*") if p.is_file() and p.name.lower() == filename.lower()),
+            None,
+        )
+        if match is None:
+            raise HTTPException(404, f"Asset '{filename}' not found in {ASSETS_DIR}")
+        path = match
 
-    # Direct candidate check
-    candidates = [
-        ASSETS_DIR / filename,
-        ROOT / "assets" / filename,
-        ROOT / "print" / filename,
-        Path.cwd() / "assets" / filename,
-    ]
-    for c in candidates:
-        if c.exists() and c.is_file():
-            return FileResponse(c)
+    return FileResponse(path, media_type="model/stl" if path.suffix.lower() == ".stl" else None)
 
-    # Case-insensitive recursive search across asset/print search dirs
-    search_dirs = [ASSETS_DIR, ROOT / "assets", ROOT / "print", ROOT, Path.cwd()]
-    for sdir in search_dirs:
-        if sdir.exists():
-            try:
-                for p in sdir.rglob("*"):
-                    if p.is_file() and p.name.lower() == clean_name:
-                        return FileResponse(p)
-            except Exception:  # noqa: BLE001
-                pass
 
-    raise HTTPException(404, f"Asset file '{filename}' not found")
+@router.get("/api/robot/model")
+async def get_robot_model(request: Request):
+    """Kinematic summary of the URDF for the 3D viewer.
+
+    The viewer needs joint limits, axes and the link tree to build MuJoCo-style
+    controls; parsing that here keeps the XML handling in one place.
+    """
+    import xml.etree.ElementTree as ET
+
+    urdf = ASSETS_DIR / "robot.urdf"
+    if not urdf.is_file():
+        raise HTTPException(404, f"robot.urdf not found in {ASSETS_DIR}")
+
+    try:
+        root = ET.fromstring(urdf.read_text(encoding="utf-8"))
+    except ET.ParseError as exc:
+        raise HTTPException(500, f"robot.urdf is not valid XML: {exc}") from exc
+
+    def _floats(text: str | None, count: int) -> list[float]:
+        parts = (text or "").split()
+        out = [float(p) for p in parts[:count]]
+        return out + [0.0] * (count - len(out))
+
+    joints = []
+    children: set[str] = set()
+    for j in root.findall("joint"):
+        parent_el = j.find("parent")
+        child_el = j.find("child")
+        limit_el = j.find("limit")
+        axis_el = j.find("axis")
+        origin_el = j.find("origin")
+        child = child_el.get("link") if child_el is not None else None
+        if child:
+            children.add(child)
+        entry = {
+            "name": j.get("name"),
+            "type": j.get("type"),
+            "parent": parent_el.get("link") if parent_el is not None else None,
+            "child": child,
+            "axis": _floats(axis_el.get("xyz") if axis_el is not None else None, 3),
+            "origin_xyz": _floats(origin_el.get("xyz") if origin_el is not None else None, 3),
+            "origin_rpy": _floats(origin_el.get("rpy") if origin_el is not None else None, 3),
+        }
+        if limit_el is not None:
+            entry["limit"] = {
+                "lower": float(limit_el.get("lower") or 0.0),
+                "upper": float(limit_el.get("upper") or 0.0),
+                "effort": float(limit_el.get("effort") or 0.0),
+                "velocity": float(limit_el.get("velocity") or 0.0),
+            }
+        joints.append(entry)
+
+    links = [l.get("name") for l in root.findall("link")]
+    roots = [name for name in links if name not in children]
+    meshes = sorted({(m.get("filename") or "").split("/")[-1] for m in root.iter("mesh")})
+    missing = [m for m in meshes if m and not (ASSETS_DIR / m).is_file()]
+
+    cfg = request.app.state.duck
+    movable = [j for j in joints if j["type"] in ("revolute", "continuous", "prismatic")]
+
+    return {
+        "robot_name": root.get("name"),
+        "urdf": "/api/robot/urdf",
+        "asset_base": "/api/robot/assets",
+        "up_axis": "z",
+        "links": links,
+        "root_link": roots[0] if roots else None,
+        "joints": joints,
+        "movable_joints": [j["name"] for j in movable],
+        # Joints the servo bus actually reports, so the UI can show which of the
+        # URDF joints are driven by live telemetry versus posed by hand.
+        "actuated_joints": [name for name in cfg.joints if name in {j["name"] for j in movable}],
+        "mesh_count": len(meshes),
+        "missing_meshes": missing,
+    }
 
 
 @router.get("/api/help")
@@ -269,79 +330,183 @@ async def keymap(request: Request):
     return request.app.state.duck.control.get("keymap", {})
 
 
+def _script_state_lookup(request: Request) -> Callable[[str], Optional[str]]:
+    registry = request.app.state.registry
+
+    def state_of(node_id: str) -> Optional[str]:
+        node = registry.get_optional(node_id)
+        return node.state.value if node else None
+
+    return state_of
+
+
+def _require_script_runner(request: Request) -> None:
+    if not request.app.state.duck.allow_script_runner:
+        raise HTTPException(403, "Script runner is disabled (allow_script_runner=false)")
+
+
+def _ensure_script_node(request: Request, rel: str) -> str:
+    """Register a node for this script if it has none yet, and return its id."""
+    path = script_fs.resolve(rel)
+    if not path.is_file() or path.suffix != ".py":
+        raise HTTPException(400, f"Not a Python script: {rel}")
+    normalized = script_fs.relative(path)
+    node_id = script_fs.node_id_for(normalized)
+    if request.app.state.registry.get_optional(node_id) is None:
+        request.app.state.registry.register(
+            make_script_node(
+                request.app.state.bus, request.app.state.locks, normalized, path
+            )
+        )
+    return node_id
+
+
 @router.get("/api/scripts")
 async def list_scripts(request: Request):
-    manifest = load_script_manifest()
+    """Flat list of every Python file under robot_scripts/, at any depth."""
+    state_of = _script_state_lookup(request)
+    manifest = script_fs.manifest_scripts()
     items = []
-    for path in sorted(SCRIPTS_DIR.glob("*.py")):
-        meta = manifest.get("scripts", {}).get(path.name, {})
-        node_id = f"script.{path.stem}"
-        node = request.app.state.registry.get_optional(node_id)
+    for rel in script_fs.list_python_files():
+        meta = script_fs.manifest_meta(rel, manifest)
+        node_id = script_fs.node_id_for(rel)
         items.append(
             {
-                "name": path.name,
+                "name": rel,
                 "node_id": node_id,
-                "display_name": meta.get("display_name", path.name),
-                "description": meta.get("description", ""),
+                "display_name": meta.get("display_name") or Path(rel).name,
+                "description": meta.get("description")
+                or script_fs.docstring_summary(SCRIPTS_DIR / rel),
                 "resources": meta.get("resources", []),
-                "state": node.state.value if node else "created",
+                "state": state_of(node_id) or "created",
             }
         )
     return items
 
 
-@router.get("/api/scripts/{name}")
-async def read_script(name: str):
-    path = _safe_script(name)
-    return {"name": name, "content": path.read_text()}
+@router.get("/api/scripts/tree")
+async def scripts_tree(request: Request):
+    return {
+        "root": SCRIPTS_DIR.name,
+        "writable": bool(request.app.state.duck.allow_script_runner),
+        "tree": script_fs.build_tree(_script_state_lookup(request)),
+    }
 
 
-@router.put("/api/scripts/{name}")
-async def write_script(name: str, request: Request):
-    if not request.app.state.duck.allow_script_runner:
-        raise HTTPException(403, "Script runner disabled")
+@router.get("/api/scripts/templates")
+async def scripts_templates():
+    return list_script_templates()
+
+
+@router.get("/api/scripts/file/{rel:path}")
+async def read_script(rel: str):
+    return script_fs.read_file(rel)
+
+
+@router.put("/api/scripts/file/{rel:path}")
+async def write_script(rel: str, request: Request):
+    _require_script_runner(request)
     body = await request.json()
-    content = body.get("content", "")
-    path = _safe_script(name, must_exist=False)
-    path.write_text(content)
-    # Ensure node exists
-    node_id = f"script.{path.stem}"
-    if request.app.state.registry.get_optional(node_id) is None:
-        manifest = load_script_manifest()
-        meta = manifest.get("scripts", {}).get(path.name, {})
-        node = ScriptNode(
-            bus=request.app.state.bus,
-            locks=request.app.state.locks,
-            script_path=path,
-            display_name=meta.get("display_name"),
-            resources=meta.get("resources"),
-            depends_on=meta.get("depends_on"),
-            description=meta.get("description", ""),
+    path = script_fs.write_file(rel, str(body.get("content", "")))
+    return {"ok": True, "path": script_fs.relative(path)}
+
+
+@router.post("/api/scripts/file")
+async def create_script(request: Request):
+    _require_script_runner(request)
+    body = await request.json()
+    folder = str(body.get("folder") or "").strip().strip("/")
+    name = str(body.get("name") or "").strip()
+    if name and "." not in name:
+        name = f"{name}.py"
+    script_fs.validate_name(name)
+    rel = f"{folder}/{name}" if folder else name
+
+    template = str(body.get("template") or "blank")
+    display_name = str(body.get("display_name") or "").strip()
+    description = str(body.get("description") or "").strip()
+    try:
+        content = render_script_template(template, name, description, display_name)
+    except KeyError as exc:
+        raise HTTPException(400, f"Unknown template '{template}'") from exc
+    if "resources" in body:
+        resources = [str(r) for r in (body.get("resources") or []) if str(r).strip()]
+    else:
+        resources = template_resources(template)
+
+    path = script_fs.create_file(rel, content)
+    normalized = script_fs.relative(path)
+    if path.suffix == ".py":
+        script_fs.set_manifest_entry(
+            normalized,
+            {
+                "display_name": display_name or path.stem.replace("_", " ").title(),
+                "description": description or f"Created from the {template} template.",
+                "resources": resources,
+            },
         )
-        request.app.state.registry.register(node)
-    return {"ok": True, "name": name}
+        _ensure_script_node(request, normalized)
+    return {"ok": True, "path": normalized}
 
 
-@router.post("/api/scripts/{name}/run")
-async def run_script(name: str, request: Request):
-    if not request.app.state.duck.allow_script_runner:
-        raise HTTPException(403, "Script runner disabled")
-    path = _safe_script(name)
-    node_id = f"script.{path.stem}"
+@router.post("/api/scripts/folder")
+async def create_script_folder(request: Request):
+    _require_script_runner(request)
+    body = await request.json()
+    folder = str(body.get("folder") or "").strip().strip("/")
+    name = script_fs.validate_name(str(body.get("name") or ""))
+    path = script_fs.create_folder(f"{folder}/{name}" if folder else name)
+    return {"ok": True, "path": script_fs.relative(path)}
+
+
+@router.post("/api/scripts/rename")
+async def rename_script(request: Request):
+    _require_script_runner(request)
+    body = await request.json()
+    src = str(body.get("from") or "")
+    dst = str(body.get("to") or "")
+    stale = script_fs.python_files_under(script_fs.resolve(src))
+    _, dst_path = script_fs.rename(src, dst)
+    for rel in stale:
+        await request.app.state.registry.unregister(script_fs.node_id_for(rel))
+    for rel in script_fs.python_files_under(dst_path):
+        if script_fs.manifest_meta(rel):
+            _ensure_script_node(request, rel)
+    return {"ok": True, "path": script_fs.relative(dst_path)}
+
+
+@router.delete("/api/scripts/file/{rel:path}")
+async def delete_script(rel: str, request: Request):
+    _require_script_runner(request)
+    path = script_fs.resolve(rel)
+    normalized = script_fs.relative(path)
+    affected = script_fs.python_files_under(path)
+    script_fs.delete(rel)
+    for item in affected:
+        await request.app.state.registry.unregister(script_fs.node_id_for(item))
+    script_fs.drop_manifest_entries(affected or [normalized])
+    return {"ok": True, "path": normalized}
+
+
+@router.post("/api/scripts/run/{rel:path}")
+async def run_script(rel: str, request: Request):
+    _require_script_runner(request)
+    node_id = _ensure_script_node(request, rel)
+    try:
+        return (await request.app.state.registry.start(node_id)).model_dump()
+    except ResourceBusyError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, str(exc)) from exc
+
+
+@router.post("/api/scripts/stop/{rel:path}")
+async def stop_script(rel: str, request: Request):
+    node_id = script_fs.node_id_for(script_fs.relative(script_fs.resolve(rel)))
     if request.app.state.registry.get_optional(node_id) is None:
-        for n in discover_script_nodes(
-            request.app.state.bus, request.app.state.locks, load_script_manifest()
-        ):
-            if n.id == node_id:
-                request.app.state.registry.register(n)
-                break
-    return (await request.app.state.registry.start(node_id)).model_dump()
-
-
-@router.post("/api/scripts/{name}/stop")
-async def stop_script(name: str, request: Request):
-    path = _safe_script(name)
-    node_id = f"script.{path.stem}"
+        raise HTTPException(404, f"{rel} is not running")
     return (await request.app.state.registry.stop(node_id)).model_dump()
 
 
@@ -455,37 +620,7 @@ async def ws_all_logs(ws: WebSocket):
 
 @router.get("/stream/camera")
 async def stream_camera(request: Request):
-    video = request.app.state.registry.get_optional("video.capture")
-    if video is None or video.state.value != "running":
-        raise HTTPException(503, "video.capture node is not running")
-
-    async def gen():
-        boundary = b"frame"
-        while True:
-            if video.state.value != "running":
-                break
-            jpeg = await video.get_jpeg()
-            if jpeg:
-                yield (
-                    b"--" + boundary + b"\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                )
-            await asyncio.sleep(1 / 15)
-
-    return StreamingResponse(
-        gen(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
+    """Alias kept for existing clients; same as /stream/video/video.capture."""
+    return await stream_video("video.capture", request)
 
 
-def _safe_script(name: str, must_exist: bool = True) -> Path:
-    if "/" in name or "\\" in name or ".." in name or not name.endswith(".py"):
-        raise HTTPException(400, "Invalid script name")
-    path = (SCRIPTS_DIR / name).resolve()
-    if SCRIPTS_DIR.resolve() not in path.parents and path != SCRIPTS_DIR.resolve():
-        # ensure under scripts dir
-        if path.parent != SCRIPTS_DIR.resolve():
-            raise HTTPException(400, "Path escape blocked")
-    if must_exist and not path.exists():
-        raise HTTPException(404, f"Script not found: {name}")
-    return path
