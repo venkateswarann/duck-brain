@@ -4,6 +4,11 @@ pydantic>=2.9.0
 psutil>=6.0.0
 numpy>=1.26.0
 paramiko>=3.4.0
+fastapi-mcp>=0.4.0
+# fastapi-mcp 0.4.x still constructs mcp.Server(name, description) positionally;
+# mcp 2.0 made description keyword-only, so stay on 1.x until fastapi-mcp catches up.
+mcp>=1.12.0,<2
 # Optional hardware (install on robot):
 # st3215
 # opencv-python-headless
+# RPi.GPIO

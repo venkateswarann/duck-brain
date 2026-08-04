@@ -16,12 +16,15 @@ from .config_loader import (
     load_json,
     load_script_manifest,
 )
+from .nodes.gpio_node import GpioPinsNode
 from .nodes.motors_telemetry import MotorsTelemetryNode
 from .nodes.script_node import discover_script_nodes
 from .nodes.system_metrics import SystemMetricsNode
 from .nodes.video_capture import VideoCaptureNode
 from .routes import api as api_routes
+from .routes import gpio as gpio_routes
 from .routes import nodes as nodes_routes
+from .routes import setup as setup_routes
 from .routes import terminal as terminal_routes
 from .routes import video as video_routes
 from .runtime.bus import TelemetryBus
@@ -58,12 +61,22 @@ async def lifespan(app: FastAPI):
     )
     state.registry.register(VideoCaptureNode(state.bus, state.locks, config=state.duck))
     state.registry.register(SystemMetricsNode(state.bus, state.locks))
+    state.registry.register(
+        GpioPinsNode(
+            state.bus, state.locks,
+            mock=state.duck.mock_hardware,
+            pinout=state.pinout,
+        )
+    )
     for sn in discover_script_nodes(
         state.bus, state.locks, load_script_manifest()
     ):
         state.registry.register(sn)
 
     enabled = dict(state.duck.nodes)
+    # Auto-start gpio.pins when devices exist in pinout
+    if state.pinout.get("devices"):
+        enabled.setdefault("gpio.pins", True)
     # Don't auto-start scripts
     await state.registry.start_enabled(enabled)
     yield
@@ -85,9 +98,15 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_routes.router)
+    app.include_router(gpio_routes.router)
     app.include_router(nodes_routes.router)
+    app.include_router(setup_routes.router)
     app.include_router(terminal_routes.router)
     app.include_router(video_routes.router)
+
+    # MCP server (Model Context Protocol for AI agents)
+    from .mcp_server import setup_mcp
+    setup_mcp(app)
 
     @app.exception_handler(ScriptFsError)
     async def script_fs_error(_request: Request, exc: ScriptFsError):

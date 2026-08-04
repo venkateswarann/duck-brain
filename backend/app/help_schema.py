@@ -141,6 +141,18 @@ PARAMETER_HELP: list[dict[str, Any]] = [
         "summary": "Enable browser PTY terminal (off by default).",
         "details": "Also requires ALLOW_WEB_TERMINAL=1 env when the terminal backend is enabled. Treat as root-equivalent access.",
     },
+    {
+        "key": "mcp_dev_mode",
+        "group": "Security",
+        "type": "bool",
+        "default": False,
+        "summary": "Enable dev mode for the MCP server (dangerous operations exposed to AI models).",
+        "details": (
+            "Default (off): only read-only operations are available to AI models via MCP. "
+            "Dev mode (on): AI models can execute config changes, run/stop scripts, control servos, "
+            "and trigger calibration. Enable at your own risk on trusted networks only."
+        ),
+    },
 ]
 
 PAGE_GUIDE: list[dict[str, str]] = [
@@ -198,6 +210,20 @@ PAGE_GUIDE: list[dict[str, str]] = [
         ),
     },
     {
+        "page": "Settings",
+        "path": "/settings",
+        "blurb": "Edit duck_config.json: robot identity, serial, camera, joints, offsets, keymap, security, and raw JSON.",
+    },
+    {
+        "page": "Setup",
+        "path": "/setup",
+        "blurb": (
+            "First-time hardware setup: assign servo IDs (connect one at a time, scan, assign) "
+            "and calibrate joint offsets (step-by-step wizard that disables torque, records zero "
+            "positions, and saves offsets to duck_config.json)."
+        ),
+    },
+    {
         "page": "Terminal",
         "path": "/terminal",
         "blurb": (
@@ -206,9 +232,9 @@ PAGE_GUIDE: list[dict[str, str]] = [
         ),
     },
     {
-        "page": "Help / Setup",
+        "page": "Help",
         "path": "/help",
-        "blurb": "This page — explain parameters and save duck_config.json.",
+        "blurb": "Read-only reference: parameter docs, UI page guide, and getting-started instructions.",
     },
 ]
 
@@ -223,7 +249,7 @@ SETUP_STEPS: list[dict[str, str]] = [
     },
     {
         "title": "3. Configure in UI",
-        "body": "Open Help / Setup, adjust robot id, serial, mock mode, poll rate, save. Restart motors node if you flipped mock_hardware.",
+        "body": "Open Settings to adjust robot id, serial, mock mode, poll rate, and save. Use Setup for servo ID assignment and joint calibration.",
     },
     {
         "title": "4. On the robot",

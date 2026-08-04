@@ -1,5 +1,31 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "board": "rpi5",
-  "devices": []
+  "devices": [
+    {
+      "id": "bno055_imu",
+      "type": "i2c_sensor",
+      "label": "BNO055 IMU",
+      "pins": {
+        "sda": 2,
+        "scl": 3
+      },
+      "mode": "I2C",
+      "reserved": true,
+      "enabled": false
+    },
+    {
+      "id": "i2s_speaker",
+      "type": "i2s_audio",
+      "label": "MAX98357A Speaker",
+      "pins": {
+        "bclk": 18,
+        "lrclk": 19,
+        "din": 21
+      },
+      "mode": "I2S",
+      "reserved": true,
+      "enabled": false
+    }
+  ]
 }

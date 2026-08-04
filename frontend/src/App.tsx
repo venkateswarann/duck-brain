@@ -12,11 +12,15 @@ import ControlPage from "./pages/ControlPage";
 import HostSystemPage from "./pages/HostSystemPage";
 import TerminalPage from "./pages/TerminalPage";
 import ConnectionsPage from "./pages/ConnectionsPage";
-import HelpSetupPage from "./pages/HelpSetupPage";
+import HelpPage from "./pages/HelpPage";
+import SettingsPage from "./pages/SettingsPage";
+import SetupPage from "./pages/SetupPage";
 import LogsPage from "./pages/LogsPage";
 
 const NAV = [
   { to: "/help", label: "Help", icon: "?" },
+  { to: "/settings", label: "Settings", icon: "⚙" },
+  { to: "/setup", label: "Setup", icon: "🔧" },
   { to: "/system/nodes", label: "System", icon: "▣" },
   { to: "/logs", label: "Logs", icon: "📋" },
   { to: "/scripts", label: "Scripts", icon: "⌘" },
@@ -74,8 +78,10 @@ export default function App() {
         </header>
         <main className="main">
           <Routes>
-            <Route path="/" element={<HelpSetupPage />} />
-            <Route path="/help" element={<HelpSetupPage />} />
+            <Route path="/" element={<HelpPage />} />
+            <Route path="/help" element={<HelpPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/setup" element={<SetupPage />} />
             <Route path="/system/nodes" element={<SystemNodesPage />} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/devices" element={<DevicesPage />} />

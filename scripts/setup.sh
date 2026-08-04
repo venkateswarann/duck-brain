@@ -239,9 +239,17 @@ Options:
   ./scripts/run.sh --frontend-only
   ./scripts/run.sh --port 8001 --frontend-port 5174
 
-Open UI:  http://127.0.0.1:5173
-Help/Setup page: http://127.0.0.1:5173/help
-API docs: http://127.0.0.1:8000/docs
+Open UI:       http://127.0.0.1:5173
+Help:          http://127.0.0.1:5173/help
+Settings:      http://127.0.0.1:5173/settings
+Setup (calib): http://127.0.0.1:5173/setup
+API docs:      http://127.0.0.1:8000/docs
+MCP (AI):      http://127.0.0.1:8000/mcp
 
-Tip: use the in-app Help page to edit parameters with explanations.
+Split deploy (backend on robot, UI on PC):
+  ./scripts/setup_robot.sh
+  ./scripts/setup_frontend.sh
+  ./scripts/run_frontend.sh --backend-url http://<robot-ip>:8000
+
+Tip: use Settings to edit duck_config.json; use Setup for servo IDs and calibration.
 EOF

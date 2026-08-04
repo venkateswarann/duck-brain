@@ -472,39 +472,707 @@ a {
   background: #14291f;
 }
 
-.pin-grid {
+/* ── GPIO Board Layout ────────────────────────────────────────── */
+
+.gpio-layout {
   display: grid;
-  grid-template-columns: 1fr 80px 1fr;
-  gap: 4px 8px;
-  padding: 16px;
-  max-width: 520px;
+  grid-template-columns: 340px 1fr;
+  flex: 1;
+  min-height: 0;
 }
 
-.pin {
+.gpio-board-panel {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gpio-board-title {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.gpio-header {
+  display: grid;
+  grid-template-columns: 1fr 16px 1fr;
+  gap: 0 6px;
+  background: #181e28;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  position: relative;
+}
+
+.gpio-notch {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+  padding-top: 2px;
+}
+
+.gpio-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pin-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.pin-row:hover {
+  background: rgba(61, 214, 140, 0.08);
+}
+
+.pin-row-right {
+  flex-direction: row;
+}
+
+.pin-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pin-row:not(.pin-row-right) .pin-label {
+  text-align: right;
+}
+
+.pin-num {
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--text);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.pin-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+  background: #121820;
+  transition: all 0.2s;
+}
+
+.pin-dot.power {
+  background: #4a1520;
+  border-color: #a33;
+}
+
+.pin-dot.gnd {
+  background: #222;
+  border-color: #555;
+}
+
+.pin-dot.gpio {
+  background: #132a1f;
+  border-color: #2a5;
+}
+
+.pin-dot.i2c, .pin-dot.uart, .pin-dot.spi {
+  background: #1a1a30;
+  border-color: #55c;
+}
+
+.pin-dot.used {
+  background: #1c3a2a;
+  border-color: var(--accent);
+  box-shadow: 0 0 4px rgba(61, 214, 140, 0.3);
+}
+
+.pin-dot.probing {
+  border-color: var(--warn);
+  background: #3a3015;
+  animation: probe-pulse 1s ease-in-out infinite;
+}
+
+.pin-dot.high {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(61, 214, 140, 0.5);
+}
+
+.pin-dot.selected {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(91, 156, 255, 0.3);
+}
+
+@keyframes probe-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(240, 193, 74, 0.3); }
+  50% { box-shadow: 0 0 10px rgba(240, 193, 74, 0.6); }
+}
+
+.gpio-legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--muted);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.gpio-legend span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Device Cards ─────────────────────────────────────────────── */
+
+.gpio-devices-panel {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.gpio-devices-scroll {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.device-card {
+  background: #151a22;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  transition: border-color 0.2s;
+}
+
+.device-card:hover {
+  border-color: #3d4b63;
+}
+
+.device-card.reserved {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.device-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: #121820;
-  border: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+
+.device-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.device-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.device-info strong {
+  font-size: 13px;
+}
+
+.device-info .muted {
   font-size: 11px;
+}
+
+.device-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.device-reserved {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+/* ── Toggle Switch ────────────────────────────────────────────── */
+
+.toggle-switch {
+  width: 40px;
+  height: 22px;
+  border-radius: 12px;
+  background: #2a3344;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.toggle-switch.on {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #8b98ad;
+  transition: all 0.2s;
+}
+
+.toggle-switch.on .toggle-knob {
+  left: 20px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(61, 214, 140, 0.5);
+}
+
+/* ── Value Badge ──────────────────────────────────────────────── */
+
+.value-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.value-badge.high {
+  background: #143528;
+  color: var(--accent);
+}
+
+.value-badge.low {
+  background: #1a1a22;
+  color: var(--muted);
+}
+
+.badge-off {
+  background: #2a1a1a !important;
+  color: var(--danger) !important;
+}
+
+.badge-off::before {
+  background: var(--danger) !important;
+}
+
+.layout-toggles {
+  display: flex;
+  gap: 6px;
+  background: #151a22;
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.layout-toggles .btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: none;
+  background: transparent;
+}
+
+.layout-toggles .btn.primary {
+  background: #2a3344;
+  color: var(--text);
+}
+
+.gpio-flex-content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.layout-bottom .gpio-flex-content {
+  flex-direction: column;
+}
+
+.layout-right .gpio-flex-content {
+  flex-direction: row;
+}
+
+/* ── Resizer Handles ──────────────────────────────────────────── */
+
+.resize-handle-main,
+.resize-handle-split {
+  flex-shrink: 0;
+  background: var(--border);
+  transition: background 0.2s;
+  z-index: 10;
+}
+
+.resize-handle-main:hover,
+.resize-handle-split:hover {
+  background: var(--accent);
+}
+
+.resize-handle-main.bottom {
+  height: 4px;
+  cursor: ns-resize;
+  margin: 0;
+}
+
+.resize-handle-main.right {
+  width: 4px;
+  cursor: ew-resize;
+  margin: 0;
+}
+
+.resize-handle-split.bottom {
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.resize-handle-split.right {
+  height: 4px;
+  cursor: ns-resize;
+}
+
+/* ── Panels Area ──────────────────────────────────────────────── */
+
+.gpio-panels-container {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.gpio-panels-container.bottom {
+  flex-direction: row;
+  height: 200px;
+}
+
+.gpio-panels-container.right {
+  flex-direction: column;
+  width: 350px;
+}
+
+.gpio-section-title {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.gpio-log-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.gpio-log-scroll {
+  flex: 1;
+  overflow-y: auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+.gpio-log-line {
+  padding: 1px 10px;
+  color: #c5d0e0;
+  white-space: nowrap;
+}
+
+.gpio-log-line:hover {
+  background: #1a2130;
+}
+
+.gpio-graph-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.gpio-canvas {
+  flex: 1;
+  width: 100%;
+  display: block;
+}
+
+/* ── Settings page ────────────────────────────────────────────── */
+
+.settings-group-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  margin-bottom: 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
 }
 
-.pin.power {
-  border-color: #a33;
-  color: #f88;
+.settings-group-btn:hover,
+.settings-group-btn.active {
+  background: #222b3c;
+  color: var(--text);
 }
-.pin.gnd {
-  border-color: #555;
+
+.settings-group-btn.active {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
-.pin.gpio {
-  border-color: #2a5;
+
+.settings-msg {
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
 }
-.pin.used {
-  background: #1c3a2a;
-  border-color: var(--accent);
+
+.settings-msg.success {
+  background: #143528;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+}
+
+.settings-msg.error {
+  background: #4a1f24;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.settings-param {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-param-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.settings-input {
+  background: #121820;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.settings-input.narrow {
+  max-width: 120px;
+  width: 120px;
+}
+
+.settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* ── Setup page ───────────────────────────────────────────────── */
+
+.setup-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 12px;
+}
+
+.setup-tab {
+  padding: 10px 14px;
+  color: var(--muted);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.setup-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.setup-banner {
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.setup-banner.success {
+  background: #143528;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+}
+
+.setup-banner.warning {
+  background: #3a2a12;
+  color: var(--warn);
+  border: 1px solid #8a6a20;
+}
+
+.setup-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+.setup-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.step-num {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #222b3c;
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.servo-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.servo-status.online {
+  color: var(--accent);
+}
+
+.servo-status.offline {
+  color: var(--danger);
+}
+
+.estop-btn {
+  font-weight: 700;
+  padding: 8px 14px;
+  box-shadow: 0 0 0 1px rgba(255, 107, 107, 0.35);
+}
+
+.calib-progress-bar {
+  height: 8px;
+  background: #0f141c;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  margin: 10px 0 16px;
+}
+
+.calib-progress-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  transition: width 0.2s ease;
+}
+
+.calib-card {
+  background: #151a22;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.calib-card.calibrated {
+  border-color: var(--accent-dim);
+}
+
+.calib-card.in_progress {
+  border-color: var(--warn);
+}
+
+.calib-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.calib-card-body {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.calib-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calib-step-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.calib-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.calib-status.pending {
+  background: #121820;
+}
+
+.calib-status.in_progress {
+  background: #3a2a12;
+  color: var(--warn);
+  border-color: #8a6a20;
+}
+
+.calib-status.calibrated {
+  background: #143528;
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.calib-status.skipped {
+  background: #1a1a22;
+  color: var(--muted);
 }
 
 .muted {

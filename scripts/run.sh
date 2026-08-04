@@ -20,7 +20,7 @@ Usage: $(basename "$0") [options]
 
 Options:
   --backend-only          Start only the FastAPI backend
-  --frontend-only         Start only the Vite frontend
+  --frontend-only         Start only the Vite frontend (local backend)
   --host HOST             Backend bind host (default: $BACKEND_HOST)
   --port PORT             Backend port (default: $BACKEND_PORT)
   --frontend-port PORT    Frontend port (default: $FRONTEND_PORT)
@@ -28,6 +28,11 @@ Options:
   -h, --help              Show this help
 
 Both services stop together on Ctrl+C.
+
+Split deployment (backend on robot, UI on PC):
+  ./scripts/setup_robot.sh
+  ./scripts/run.sh --backend-only
+  ./scripts/run_frontend.sh --backend-url http://<robot-ip>:8000
 EOF
 }
 

@@ -50,6 +50,7 @@ class DuckConfig(BaseModel):
     control: dict[str, Any] = Field(default_factory=dict)
     allow_script_runner: bool = True
     allow_web_terminal: bool = False
+    mcp_dev_mode: bool = False
 
 
 class NodeInfo(BaseModel):

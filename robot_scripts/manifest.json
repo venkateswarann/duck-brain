@@ -155,6 +155,10 @@
         "camera0"
       ],
       "depends_on": []
+    },
+    "usb_camera.py": {
+      "display_name": "USBCamera",
+      "description": "Created from the usb_camera template."
     }
   }
 }
