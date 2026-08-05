@@ -201,6 +201,50 @@ async def remove_device(address: str) -> dict[str, Any]:
     return {"ok": True, "address": address, "log": log}
 
 
+async def _rfkill_unblock() -> str:
+    """Attempt to soft-unblock the Bluetooth adapter via rfkill.
+
+    rfkill is the kernel RF-kill subsystem.  BlueZ returns
+    org.bluez.Error.Failed when the adapter's PowerState is 'off-blocked',
+    which means rfkill has the adapter blocked.  We must unblock it before
+    bluetoothctl can power the adapter on.
+    """
+    if not shutil.which("rfkill"):
+        return "rfkill not found (skipped)"
+    proc = await asyncio.create_subprocess_exec(
+        "rfkill", "unblock", "bluetooth",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+    return ((out_b or b"") + (err_b or b"")).decode(errors="replace").strip()
+
+
 async def set_powered(on: bool) -> dict[str, Any]:
-    log = await _run_bt("power", "on" if on else "off")
-    return {"ok": True, "powered": on, "log": log}
+    rfkill_log = ""
+    if on:
+        # If the adapter is rfkill-blocked (PowerState: off-blocked),
+        # bluetoothctl will return org.bluez.Error.Failed.  Unblock first.
+        try:
+            status = await adapter_status()
+            if status.get("raw", "").find("off-blocked") != -1 or not status.get("powered"):
+                rfkill_log = await _rfkill_unblock()
+                # Give BlueZ a moment to register the unblock
+                await asyncio.sleep(0.5)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        log = await _run_bt("power", "on" if on else "off")
+    except BluetoothError as exc:
+        # If still failing after rfkill unblock, provide a clearer message
+        msg = str(exc)
+        if "Failed" in msg and on:
+            raise BluetoothError(
+                f"Could not power on Bluetooth adapter. "
+                f"rfkill output: '{rfkill_log or 'n/a'}'. "
+                f"BlueZ error: {msg}. "
+                f"If there is a hard block (physical switch or firmware), "
+                f"rfkill cannot clear it — check 'rfkill list' on the device."
+            ) from exc
+        raise
+    return {"ok": True, "powered": on, "log": (rfkill_log + "\n" + log).strip()}

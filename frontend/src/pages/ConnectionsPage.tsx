@@ -264,6 +264,13 @@ function NetworkPanel() {
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const [wifiNetworks, setWifiNetworks] = useState<any[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [connectTarget, setConnectTarget] = useState<any>(null);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [actionErr, setActionErr] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -271,6 +278,7 @@ function NetworkPanel() {
     try {
       const d = await fetch(apiUrl("/api/network")).then((r) => r.json());
       setData(d);
+      if (d.wifi?.networks) setWifiNetworks(d.wifi.networks);
     } catch (e: any) {
       setErr(String(e.message || e));
     } finally {
@@ -278,155 +286,279 @@ function NetworkPanel() {
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  if (err) {
-    return (
-      <div className="placeholder" style={{ color: "var(--danger)" }}>
-        {err}
-      </div>
-    );
-  }
-  if (!data) {
-    return <div className="placeholder">{loading ? "Loading…" : "—"}</div>;
-  }
+  const rescan = async () => {
+    setScanning(true);
+    setActionErr("");
+    setMsg("");
+    try {
+      const res = await fetch(apiUrl("/api/network/wifi/scan"), { method: "POST" });
+      const d = await res.json();
+      if (d.networks) setWifiNetworks(d.networks);
+      setMsg(`Scan complete — ${d.networks?.length ?? 0} network(s) found`);
+    } catch (e: any) {
+      setActionErr(String(e.message || e));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const connectWifi = async () => {
+    if (!connectTarget) return;
+    setBusy(true);
+    setActionErr("");
+    setMsg("");
+    try {
+      const res = await fetch(apiUrl("/api/network/wifi/connect"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ssid: connectTarget.ssid, password: password || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || JSON.stringify(d));
+      setMsg(`Connected to "${connectTarget.ssid}"`);
+      setConnectTarget(null);
+      setPassword("");
+      await load();
+    } catch (e: any) {
+      setActionErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async (device: string) => {
+    setBusy(true);
+    setActionErr("");
+    setMsg("");
+    try {
+      const res = await fetch(apiUrl("/api/network/wifi/disconnect"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || JSON.stringify(d));
+      setMsg("Disconnected");
+      await load();
+    } catch (e: any) {
+      setActionErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forget = async (connectionName: string) => {
+    if (!confirm(`Forget "${connectionName}"?`)) return;
+    setBusy(true);
+    setActionErr("");
+    setMsg("");
+    try {
+      const res = await fetch(apiUrl("/api/network/wifi/forget"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection: connectionName }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || JSON.stringify(d));
+      setMsg(`Forgotten "${connectionName}"`);
+      await load();
+    } catch (e: any) {
+      setActionErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (err) return <div className="placeholder" style={{ color: "var(--danger)" }}>{err}</div>;
+  if (!data) return <div className="placeholder">{loading ? "Loading…" : "—"}</div>;
+
+  const wifiDevices = (data.wifi?.devices || []).filter((d: any) => d.type === "wifi");
+  const wifiAvailable = data.wifi?.available;
 
   return (
-    <div style={{ padding: 16 }}>
-      <div className="page-title" style={{ border: "none", padding: "0 0 12px" }}>
-        <span>
-          {data.hostname}
-          {data.fqdn && data.fqdn !== data.hostname ? ` · ${data.fqdn}` : ""}
-        </span>
-        <button className="btn" onClick={load} disabled={loading}>
-          Refresh
-        </button>
-      </div>
+    <div style={{ padding: 16, display: "grid", gap: 20, maxWidth: 900 }}>
 
-      <div className="kv">
-        <div className="k">DNS</div>
-        <div>{(data.dns || []).join(", ") || "—"}</div>
-        <div className="k">Tools</div>
-        <div>
-          nmcli: {data.tools?.nmcli ? "yes" : "no"} · ip:{" "}
-          {data.tools?.ip ? "yes" : "no"}
+      {/* Status messages */}
+      {msg && <div style={{ color: "var(--accent)", fontSize: 13 }}>✓ {msg}</div>}
+      {actionErr && <div style={{ color: "var(--danger)", fontSize: 13 }}>✕ {actionErr}</div>}
+
+      {/* Interfaces */}
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h4 style={{ margin: 0 }}>Network Interfaces</h4>
+          <button className="btn" onClick={load} disabled={loading}>↺ Refresh</button>
         </div>
+        <table className="table">
+          <thead><tr><th>Interface</th><th>Status</th><th>IPv4</th><th>MAC</th><th>RX / TX</th></tr></thead>
+          <tbody>
+            {(data.interfaces || []).map((i: any) => (
+              <tr key={i.name}>
+                <td><strong>{i.name}</strong></td>
+                <td><span style={{ color: i.isup ? "var(--accent)" : "var(--muted)" }}>{i.isup ? "▲ up" : "▼ down"}</span></td>
+                <td>{(i.ipv4 || []).join(", ") || "—"}</td>
+                <td><code style={{ fontSize: 11 }}>{i.mac || "—"}</code></td>
+                <td className="muted" style={{ fontSize: 11 }}>{formatBytes(i.bytes_recv)} ↓ / {formatBytes(i.bytes_sent)} ↑</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      <h3>Interfaces</h3>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Up</th>
-            <th>IPv4</th>
-            <th>MAC</th>
-            <th>RX / TX</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(data.interfaces || []).map((i: any) => (
-            <tr key={i.name}>
-              <td>{i.name}</td>
-              <td>{i.isup ? "up" : "down"}</td>
-              <td>{(i.ipv4 || []).join(", ") || "—"}</td>
-              <td>
-                <code>{i.mac || "—"}</code>
-              </td>
-              <td className="muted">
-                {formatBytes(i.bytes_recv)} / {formatBytes(i.bytes_sent)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h3>Routes</h3>
-      <pre className="log-view" style={{ maxHeight: 160 }}>
-        {data.routes || "(none)"}
-      </pre>
-
-      {data.wifi?.available && (
-        <>
-          <h3>NetworkManager devices</h3>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Device</th>
-                <th>Type</th>
-                <th>State</th>
-                <th>Connection</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data.wifi.devices || []).map((d: any) => (
-                <tr key={d.device}>
-                  <td>{d.device}</td>
-                  <td>{d.type}</td>
-                  <td>{d.state}</td>
-                  <td>{d.connection}</td>
-                </tr>
+      {/* WiFi Section — only shown when nmcli is available */}
+      {wifiAvailable && (
+        <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div>
+              <h4 style={{ margin: "0 0 2px" }}>📶 Wi-Fi</h4>
+              {wifiDevices.length > 0 && (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {wifiDevices.map((d: any) => `${d.device}: ${d.state}${d.connection ? ` — ${d.connection}` : ""}`).join(" · ")}
+                </span>
+              )}
+            </div>
+            <div className="btn-row">
+              {wifiDevices.filter((d: any) => d.state === "connected").map((d: any) => (
+                <button key={d.device} className="btn danger" disabled={busy} onClick={() => disconnect(d.device)}>
+                  Disconnect {d.device}
+                </button>
               ))}
-            </tbody>
-          </table>
+              <button className="btn primary" disabled={scanning || busy} onClick={rescan}>
+                {scanning ? "Scanning…" : "⟳ Rescan"}
+              </button>
+            </div>
+          </div>
 
-          <h3>Wi‑Fi networks</h3>
           {!data.wifi.scan_ok && (
-            <p className="muted">
-              Scan unavailable: {data.wifi.scan_error || "need privileges / wifi device"}
-            </p>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+              ⚠ Scan unavailable: {data.wifi.scan_error || "need nmcli privileges"}
+            </div>
           )}
-          <table className="table">
-            <thead>
-              <tr>
-                <th>SSID</th>
-                <th>Signal</th>
-                <th>Security</th>
-                <th>In use</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data.wifi.networks || []).map((n: any, idx: number) => (
-                <tr key={`${n.ssid}-${idx}`}>
-                  <td>{n.ssid || "(hidden)"}</td>
-                  <td>{n.signal}</td>
-                  <td>{n.security}</td>
-                  <td>{n.in_use ? "yes" : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {wifiNetworks.length === 0 && (
+              <div className="placeholder" style={{ padding: 12 }}>No networks found — click Rescan</div>
+            )}
+            {wifiNetworks.map((n: any, idx: number) => {
+              const sig = Number(n.signal) || 0;
+              const bars = sig >= 75 ? 4 : sig >= 50 ? 3 : sig >= 25 ? 2 : 1;
+              const barColor = sig >= 60 ? "var(--accent)" : sig >= 30 ? "#f0a030" : "var(--danger)";
+              const secured = n.security && n.security !== "--" && n.security !== "";
+              return (
+                <div
+                  key={`${n.ssid}-${idx}`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+                    background: n.in_use ? "rgba(61,214,140,0.07)" : "var(--bg)",
+                    border: `1px solid ${n.in_use ? "var(--accent)" : "var(--border)"}`,
+                    borderRadius: 6,
+                  }}
+                >
+                  {/* Signal bars */}
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 2, width: 22 }}>
+                    {[1,2,3,4].map(b => (
+                      <div key={b} style={{
+                        width: 4, borderRadius: 1,
+                        height: b * 5,
+                        background: b <= bars ? barColor : "var(--border)",
+                      }} />
+                    ))}
+                  </div>
+
+                  {/* SSID + meta */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <strong style={{ fontSize: 14 }}>{n.ssid || "(hidden)"}</strong>
+                      {n.in_use && <span className="badge" style={{ fontSize: 10, padding: "1px 6px" }}>Connected</span>}
+                      {secured && <span className="muted" style={{ fontSize: 11 }}>🔒 {n.security}</span>}
+                    </div>
+                    <div className="muted" style={{ fontSize: 11 }}>{sig}% signal</div>
+                  </div>
+
+                  {/* Actions */}
+                  {!n.in_use && (
+                    <button
+                      className="btn primary"
+                      style={{ fontSize: 12, padding: "4px 12px" }}
+                      disabled={busy}
+                      onClick={() => { setConnectTarget(n); setPassword(""); setActionErr(""); }}
+                    >
+                      Connect
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
-      {(data.connections || []).length > 0 && (
-        <>
-          <h3>Saved connections</h3>
+      {/* Saved connections with Forget button */}
+      {(data.connections || []).filter((c: any) => c.type === "802-11-wireless").length > 0 && (
+        <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 16 }}>
+          <h4 style={{ margin: "0 0 12px" }}>Saved Wi-Fi Profiles</h4>
           <table className="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Device</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Network</th><th>Device</th><th>Actions</th></tr></thead>
             <tbody>
-              {data.connections.map((c: any) => (
+              {data.connections.filter((c: any) => c.type === "802-11-wireless").map((c: any) => (
                 <tr key={c.uuid}>
-                  <td>{c.name}</td>
-                  <td>{c.type}</td>
+                  <td><strong>{c.name}</strong></td>
                   <td>{c.device || "—"}</td>
+                  <td>
+                    <button className="btn danger" style={{ fontSize: 12 }} disabled={busy} onClick={() => forget(c.name)}>
+                      Forget
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </>
+        </div>
+      )}
+
+      {/* Routes */}
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 16 }}>
+        <h4 style={{ margin: "0 0 8px" }}>Routes</h4>
+        <pre className="log-view" style={{ maxHeight: 140, margin: 0 }}>{data.routes || "(none)"}</pre>
+      </div>
+
+      {/* Connect modal */}
+      {connectTarget && (
+        <div className="modal-backdrop" onClick={() => setConnectTarget(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
+            <h3 style={{ marginTop: 0 }}>Connect to "{connectTarget.ssid}"</h3>
+            {connectTarget.security && connectTarget.security !== "--" ? (
+              <div className="field">
+                <span>Password ({connectTarget.security})</span>
+                <input
+                  type="password"
+                  autoFocus
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && connectWifi()}
+                  placeholder="Wi-Fi password"
+                  style={{ width: "100%" }}
+                />
+              </div>
+            ) : (
+              <p className="muted" style={{ marginTop: 0 }}>Open network — no password required.</p>
+            )}
+            {actionErr && <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 8 }}>✕ {actionErr}</div>}
+            <div className="btn-row" style={{ marginTop: 12 }}>
+              <button className="btn primary" disabled={busy} onClick={connectWifi}>
+                {busy ? "Connecting…" : "Connect"}
+              </button>
+              <button className="btn" onClick={() => { setConnectTarget(null); setPassword(""); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
 }
+
+
 
 function genId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {

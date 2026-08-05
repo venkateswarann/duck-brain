@@ -223,6 +223,55 @@ async def network_settings():
     return await network_snapshot()
 
 
+@router.post("/api/network/wifi/scan")
+async def wifi_scan():
+    from ..services.network import wifi_scan as _scan
+    return await _scan()
+
+
+@router.post("/api/network/wifi/connect")
+async def wifi_connect(request: Request):
+    from ..services.network import wifi_connect as _connect
+    body = await request.json()
+    ssid = str(body.get("ssid", "")).strip()
+    password = body.get("password") or None
+    if not ssid:
+        raise HTTPException(400, "ssid is required")
+    result = await _connect(ssid, password)
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("error", "Connect failed"))
+    return result
+
+
+@router.post("/api/network/wifi/disconnect")
+async def wifi_disconnect(request: Request):
+    from ..services.network import wifi_disconnect as _disconnect
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        pass
+    device = str(body.get("device", "wlan0"))
+    result = await _disconnect(device)
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("error", "Disconnect failed"))
+    return result
+
+
+@router.post("/api/network/wifi/forget")
+async def wifi_forget(request: Request):
+    from ..services.network import wifi_forget as _forget
+    body = await request.json()
+    name = str(body.get("connection", "")).strip()
+    if not name:
+        raise HTTPException(400, "connection name is required")
+    result = await _forget(name)
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("error", "Forget failed"))
+    return result
+
+
+
 @router.get("/api/bluetooth/status")
 async def bluetooth_status():
     from ..services.bluetooth import adapter_status

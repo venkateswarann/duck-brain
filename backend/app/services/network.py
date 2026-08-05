@@ -150,3 +150,66 @@ async def network_snapshot() -> dict[str, Any]:
             "ip": shutil.which("ip") is not None,
         },
     }
+
+
+async def wifi_scan() -> dict[str, Any]:
+    """Trigger a fresh Wi-Fi scan and return updated network list."""
+    if not shutil.which("nmcli"):
+        return {"ok": False, "error": "nmcli not available", "networks": []}
+    # Force a rescan first
+    await _run(["nmcli", "device", "wifi", "rescan"], timeout=8.0)
+    c, out = await _run(
+        ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,IN-USE", "device", "wifi", "list"],
+        timeout=12.0,
+    )
+    networks: list[dict[str, Any]] = []
+    if c == 0:
+        seen: set[str] = set()
+        for line in out.splitlines():
+            parts = line.split(":")
+            if len(parts) >= 4:
+                ssid = parts[0]
+                if not ssid or ssid in seen:
+                    continue
+                seen.add(ssid)
+                networks.append({
+                    "ssid": ssid,
+                    "signal": parts[1],
+                    "security": parts[2],
+                    "in_use": parts[3] == "*",
+                })
+    return {"ok": c == 0, "error": None if c == 0 else out.strip(), "networks": networks}
+
+
+async def wifi_connect(ssid: str, password: str | None = None) -> dict[str, Any]:
+    """Connect to a Wi-Fi network by SSID, optionally with a password."""
+    if not shutil.which("nmcli"):
+        return {"ok": False, "error": "nmcli not available"}
+    cmd = ["nmcli", "device", "wifi", "connect", ssid]
+    if password:
+        cmd += ["password", password]
+    code, out = await _run(cmd, timeout=30.0)
+    if code != 0:
+        return {"ok": False, "error": out.strip()}
+    return {"ok": True, "log": out.strip()}
+
+
+async def wifi_disconnect(device: str = "wlan0") -> dict[str, Any]:
+    """Disconnect the Wi-Fi device."""
+    if not shutil.which("nmcli"):
+        return {"ok": False, "error": "nmcli not available"}
+    code, out = await _run(["nmcli", "device", "disconnect", device], timeout=10.0)
+    if code != 0:
+        return {"ok": False, "error": out.strip()}
+    return {"ok": True, "log": out.strip()}
+
+
+async def wifi_forget(connection_name: str) -> dict[str, Any]:
+    """Delete a saved Wi-Fi connection profile by name."""
+    if not shutil.which("nmcli"):
+        return {"ok": False, "error": "nmcli not available"}
+    code, out = await _run(["nmcli", "connection", "delete", connection_name], timeout=10.0)
+    if code != 0:
+        return {"ok": False, "error": out.strip()}
+    return {"ok": True, "log": out.strip()}
+
