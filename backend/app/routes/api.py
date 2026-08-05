@@ -530,6 +530,11 @@ async def put_pinout(request: Request):
     body = await request.json()
     request.app.state.pinout = body
     save_json(request.app.state.pinout_path, body)
+    # Notify the running gpio.pins node so newly-added devices get set up
+    # on hardware immediately without requiring a node restart.
+    gpio_node = request.app.state.registry.get_optional("gpio.pins")
+    if gpio_node is not None:
+        await gpio_node.reload_pinout(body)
     return body
 
 

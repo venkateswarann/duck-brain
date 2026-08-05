@@ -777,6 +777,15 @@ a {
   background: var(--danger) !important;
 }
 
+.badge-warn {
+  background: #2a2010 !important;
+  color: #f0a030 !important;
+}
+
+.badge-warn::before {
+  background: #f0a030 !important;
+}
+
 .layout-toggles {
   display: flex;
   gap: 6px;

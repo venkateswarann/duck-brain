@@ -96,6 +96,7 @@ export default function BoardPinsPage() {
   const [selectedBcm, setSelectedBcm] = useState<number | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [gpioRunning, setGpioRunning] = useState(false);
+  const [gpioMock, setGpioMock] = useState(false);
 
   // Layout State
   const [showLogs, setShowLogs] = useState(true);
@@ -187,6 +188,7 @@ export default function BoardPinsPage() {
             const data = await r.json();
             setGpioState(data.pins || []);
             setGpioRunning(true);
+            setGpioMock(data.mock === true);
           } else {
             setGpioRunning(false);
           }
@@ -308,6 +310,11 @@ export default function BoardPinsPage() {
   };
 
   const togglePin = async (bcm: number, currentVal: number) => {
+    // Ensure the pin is set up first if not already registered in the GPIO service
+    if (!gpioMap[bcm]) {
+      const dev = pinout.devices.find(d => Number(d.pins?.signal) === bcm);
+      if (dev) await setupDeviceOnHardware(dev);
+    }
     await fetch(apiUrl("/api/gpio/write"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -453,6 +460,15 @@ export default function BoardPinsPage() {
           <span className={`badge ${gpioRunning ? "" : "badge-off"}`}>
             {gpioRunning ? "GPIO Active" : "GPIO Offline"}
           </span>
+          {gpioMock && gpioRunning && (
+            <span
+              className="badge badge-warn"
+              title="RPi.GPIO is not installed — pin writes are simulated only and will NOT affect real hardware"
+              style={{ cursor: "help" }}
+            >
+              ⚠ Mock Mode
+            </span>
+          )}
           <select className="btn" value={pinout.board} onChange={e => save({ ...pinout, board: e.target.value })}>
             {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>

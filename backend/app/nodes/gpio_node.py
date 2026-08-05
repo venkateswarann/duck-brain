@@ -97,6 +97,49 @@ class GpioPinsNode(Node):
             self.gpio.cleanup_all()
             self.gpio = None
 
-    def reload_pinout(self, pinout: dict[str, Any]) -> None:
-        """Update pinout config (used when config is saved from the UI)."""
+    async def reload_pinout(self, pinout: dict[str, Any]) -> None:
+        """Update pinout config and apply any newly-enabled devices to the live GPIO service.
+
+        Called automatically by PUT /api/pinout so new devices take effect
+        immediately without restarting the node.
+        """
         self._pinout = pinout
+        if self.gpio is None:
+            return  # node not running yet — on_start will pick up the new config
+
+        devices = pinout.get("devices") or []
+        for dev in devices:
+            if not dev.get("enabled", True) or dev.get("reserved", False):
+                continue
+
+            pins = dev.get("pins", {})
+            signal_pin = pins.get("signal")
+            if signal_pin is None:
+                continue
+            try:
+                signal_pin = int(signal_pin)
+            except (ValueError, TypeError):
+                self.log(f"skipping {dev.get('id', '?')}: pin not a number")
+                continue
+
+            # Skip pins already registered — don't reinitialise a live pin
+            if signal_pin in self.gpio._pins:
+                continue
+
+            mode = dev.get("mode", "OUT").upper()
+            direction = Direction.IN if mode == "IN" else Direction.OUT
+            pull_str = dev.get("pull", "NONE").upper()
+            pull = Pull.UP if pull_str == "UP" else Pull.DOWN if pull_str == "DOWN" else Pull.NONE
+
+            self.gpio.setup_pin(
+                signal_pin, direction, pull=pull,
+                device_id=dev.get("id"), label=dev.get("label"),
+            )
+
+            if direction == Direction.OUT:
+                self.gpio.write_pin(signal_pin, int(dev.get("default_value", 0)))
+
+            if direction == Direction.IN and dev.get("probe", False):
+                rate = float(dev.get("probe_rate_hz", 50))
+                await self.gpio.start_probe(signal_pin, rate)
+

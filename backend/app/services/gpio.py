@@ -13,6 +13,10 @@ from enum import Enum
 from typing import Any, Optional
 
 # RPi.GPIO is optional — only present on actual Raspberry Pi hardware.
+import logging as _logging
+
+_log = _logging.getLogger(__name__)
+
 try:
     import RPi.GPIO as _GPIO  # type: ignore[import-untyped]
 
@@ -64,7 +68,21 @@ class GpioService:
         bus: Any = None,
         node_id: str = "gpio.pins",
     ) -> None:
-        self.mock = mock or not _HAS_GPIO
+        if mock:
+            self.mock = True
+        elif not _HAS_GPIO:
+            # RPi.GPIO not available — cannot drive real hardware.
+            # Fall back to mock mode but emit a clear warning so it's
+            # never silently ignored.
+            self.mock = True
+            _log.warning(
+                "RPi.GPIO is not installed or not available on this platform. "
+                "GPIO service is running in MOCK mode — pin writes will NOT "
+                "affect real hardware. Install RPi.GPIO on a Raspberry Pi to "
+                "enable real GPIO control."
+            )
+        else:
+            self.mock = False
         self.bus = bus
         self.node_id = node_id
         self._pins: dict[int, PinState] = {}
