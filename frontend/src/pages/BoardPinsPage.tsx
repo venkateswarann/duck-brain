@@ -315,11 +315,23 @@ export default function BoardPinsPage() {
       const dev = pinout.devices.find(d => Number(d.pins?.signal) === bcm);
       if (dev) await setupDeviceOnHardware(dev);
     }
-    await fetch(apiUrl("/api/gpio/write"), {
+    const nextVal = currentVal ? 0 : 1;
+    // Optimistic update — reflect the change immediately in the UI without
+    // waiting up to 1s for the next poll cycle to confirm it.
+    setGpioState(prev =>
+      prev.map(p => p.bcm === bcm ? { ...p, value: nextVal } : p)
+    );
+    const res = await fetch(apiUrl("/api/gpio/write"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bcm, value: currentVal ? 0 : 1 }),
+      body: JSON.stringify({ bcm, value: nextVal }),
     });
+    // If the write failed, revert the optimistic update
+    if (!res.ok) {
+      setGpioState(prev =>
+        prev.map(p => p.bcm === bcm ? { ...p, value: currentVal } : p)
+      );
+    }
   };
 
   const toggleProbe = async (bcm: number, probing: boolean) => {
