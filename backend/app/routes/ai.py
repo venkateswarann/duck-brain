@@ -92,10 +92,8 @@ async def test_llm_connection(request: Request):
     }
 
     if "nemotron" in model.lower() or "nvidia" in model.lower() or "deepseek" in model.lower():
-        payload["extra_body"] = {
-            "chat_template_kwargs": {"enable_thinking": True},
-            "reasoning_budget": 2048,
-        }
+        payload["chat_template_kwargs"] = {"enable_thinking": True}
+        payload["reasoning_budget"] = 2048
 
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
@@ -165,10 +163,8 @@ async def chat_with_agent(request: Request):
 
     # Add NVIDIA Nemotron / DeepSeek reasoning parameters if applicable
     if "nemotron" in model.lower() or "nvidia" in model.lower() or "deepseek" in model.lower():
-        payload["extra_body"] = {
-            "chat_template_kwargs": {"enable_thinking": True},
-            "reasoning_budget": min(16384, int(duck.llm_max_tokens or 8192)),
-        }
+        payload["chat_template_kwargs"] = {"enable_thinking": True}
+        payload["reasoning_budget"] = min(16384, int(duck.llm_max_tokens or 8192))
 
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
