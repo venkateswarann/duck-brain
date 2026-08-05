@@ -153,6 +153,55 @@ PARAMETER_HELP: list[dict[str, Any]] = [
             "and trigger calibration. Enable at your own risk on trusted networks only."
         ),
     },
+    {
+        "key": "llm_provider",
+        "group": "LLM Agent",
+        "type": "enum",
+        "default": "nvidia",
+        "options": ["nvidia", "ollama", "openai", "custom"],
+        "summary": "LLM provider type for the AI Script Assistant.",
+        "details": "nvidia (NVIDIA NIM endpoints), ollama (local or remote Ollama), openai, or custom.",
+    },
+    {
+        "key": "llm_endpoint",
+        "group": "LLM Agent",
+        "type": "string",
+        "default": "https://integrate.api.nvidia.com/v1",
+        "summary": "Base URL of the LLM endpoint (OpenAI / NIM / Ollama compatible).",
+        "details": "e.g. https://integrate.api.nvidia.com/v1 for NVIDIA NIM, http://localhost:11434/v1 for local Ollama.",
+    },
+    {
+        "key": "llm_api_key",
+        "group": "LLM Agent",
+        "type": "string",
+        "default": "",
+        "summary": "API secret key for LLM authentication.",
+        "details": "Stored in duck_config.json. Masked in UI.",
+    },
+    {
+        "key": "llm_model",
+        "group": "LLM Agent",
+        "type": "string",
+        "default": "nvidia/nemotron-3-ultra-550b-a55b",
+        "summary": "LLM model identifier string.",
+        "details": "e.g. nvidia/nemotron-3-ultra-550b-a55b, llama3.2, qwen2.5-coder, gpt-4o-mini.",
+    },
+    {
+        "key": "llm_temperature",
+        "group": "LLM Agent",
+        "type": "float",
+        "default": 0.7,
+        "summary": "Sampling temperature for AI code generation.",
+        "details": "Higher = more creative, lower = more deterministic.",
+    },
+    {
+        "key": "llm_max_tokens",
+        "group": "LLM Agent",
+        "type": "int",
+        "default": 8192,
+        "summary": "Maximum completion tokens to request from LLM.",
+        "details": "Nemotron & Qwen support up to 16384 tokens.",
+    },
 ]
 
 PAGE_GUIDE: list[dict[str, str]] = [

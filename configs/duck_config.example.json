@@ -10,20 +10,90 @@
   "camera_height": 480,
   "serial_policy": "prefer_script",
   "joints": {
-    "right_hip_yaw": { "id": 10, "min": -1.5, "max": 1.5, "unit": "rad" },
-    "right_hip_roll": { "id": 11, "min": -0.8, "max": 0.8, "unit": "rad" },
-    "right_hip_pitch": { "id": 12, "min": -1.5, "max": 1.5, "unit": "rad" },
-    "right_knee": { "id": 13, "min": 0.0, "max": 2.2, "unit": "rad" },
-    "right_ankle": { "id": 14, "min": -1.5, "max": 0.5, "unit": "rad" },
-    "left_hip_yaw": { "id": 20, "min": -1.5, "max": 1.5, "unit": "rad" },
-    "left_hip_roll": { "id": 21, "min": -0.8, "max": 0.8, "unit": "rad" },
-    "left_hip_pitch": { "id": 22, "min": -1.5, "max": 1.5, "unit": "rad" },
-    "left_knee": { "id": 23, "min": 0.0, "max": 2.2, "unit": "rad" },
-    "left_ankle": { "id": 24, "min": -1.5, "max": 0.5, "unit": "rad" },
-    "neck_pitch": { "id": 30, "min": -0.8, "max": 0.8, "unit": "rad" },
-    "head_pitch": { "id": 31, "min": -0.8, "max": 0.8, "unit": "rad" },
-    "head_yaw": { "id": 32, "min": -1.2, "max": 1.2, "unit": "rad" },
-    "head_roll": { "id": 33, "min": -0.6, "max": 0.6, "unit": "rad" }
+    "right_hip_yaw": {
+      "id": 10,
+      "min": -1.5,
+      "max": 1.5,
+      "unit": "rad"
+    },
+    "right_hip_roll": {
+      "id": 11,
+      "min": -0.8,
+      "max": 0.8,
+      "unit": "rad"
+    },
+    "right_hip_pitch": {
+      "id": 12,
+      "min": -1.5,
+      "max": 1.5,
+      "unit": "rad"
+    },
+    "right_knee": {
+      "id": 13,
+      "min": 0.0,
+      "max": 2.2,
+      "unit": "rad"
+    },
+    "right_ankle": {
+      "id": 14,
+      "min": -1.5,
+      "max": 0.5,
+      "unit": "rad"
+    },
+    "left_hip_yaw": {
+      "id": 20,
+      "min": -1.5,
+      "max": 1.5,
+      "unit": "rad"
+    },
+    "left_hip_roll": {
+      "id": 21,
+      "min": -0.8,
+      "max": 0.8,
+      "unit": "rad"
+    },
+    "left_hip_pitch": {
+      "id": 22,
+      "min": -1.5,
+      "max": 1.5,
+      "unit": "rad"
+    },
+    "left_knee": {
+      "id": 23,
+      "min": 0.0,
+      "max": 2.2,
+      "unit": "rad"
+    },
+    "left_ankle": {
+      "id": 24,
+      "min": -1.5,
+      "max": 0.5,
+      "unit": "rad"
+    },
+    "neck_pitch": {
+      "id": 30,
+      "min": -0.8,
+      "max": 0.8,
+      "unit": "rad"
+    },
+    "head_pitch": {
+      "id": 31,
+      "min": -0.8,
+      "max": 0.8,
+      "unit": "rad"
+    },
+    "head_yaw": {
+      "id": 32,
+      "min": -1.2,
+      "max": 1.2,
+      "unit": "rad"
+    },
+    "head_roll": {
+      "id": 33,
+      "min": -0.6,
+      "max": 0.6,
+      "unit": "rad"
+    }
   },
   "joints_offsets": {
     "left_hip_yaw": 0.0,
@@ -42,11 +112,26 @@
     "right_ankle": 0.0
   },
   "telemetry_scales": {
-    "temperature_c": { "min": 0, "max": 80 },
-    "voltage_v": { "min": 4.0, "max": 8.5 },
-    "current_ma": { "min": 0, "max": 3000 },
-    "load": { "min": -1024, "max": 1023 },
-    "speed": { "min": -3400, "max": 3400 }
+    "temperature_c": {
+      "min": 0,
+      "max": 80
+    },
+    "voltage_v": {
+      "min": 4.0,
+      "max": 8.5
+    },
+    "current_ma": {
+      "min": 0,
+      "max": 3000
+    },
+    "load": {
+      "min": -1024,
+      "max": 1023
+    },
+    "speed": {
+      "min": -3400,
+      "max": 3400
+    }
   },
   "nodes": {
     "motors.telemetry": true,
@@ -55,11 +140,31 @@
   },
   "control": {
     "keymap": {
-      "walk_x": { "type": "axis", "id": 1, "label": "Left Stick Y" },
-      "walk_y": { "type": "axis", "id": 0, "label": "Left Stick X" },
-      "yaw": { "type": "axis", "id": 3, "label": "Right Stick X" },
-      "pause": { "type": "button", "id": 7, "label": "Start" },
-      "estop": { "type": "button", "id": 1, "label": "B" }
+      "walk_x": {
+        "type": "axis",
+        "id": 1,
+        "label": "Left Stick Y"
+      },
+      "walk_y": {
+        "type": "axis",
+        "id": 0,
+        "label": "Left Stick X"
+      },
+      "yaw": {
+        "type": "axis",
+        "id": 3,
+        "label": "Right Stick X"
+      },
+      "pause": {
+        "type": "button",
+        "id": 7,
+        "label": "Start"
+      },
+      "estop": {
+        "type": "button",
+        "id": 1,
+        "label": "B"
+      }
     }
   },
   "allow_script_runner": true,

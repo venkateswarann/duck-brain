@@ -48,6 +48,18 @@ type PinApiState = {
 
 type ProbeSample = { bcm: number; value: number; ts: number };
 
+type PlotPane = {
+  id: string;
+  title: string;
+  bcms: number[];
+  paused: boolean;
+  timeWindowSec: number;
+  autoScale: boolean;
+  minVal: number;
+  maxVal: number;
+  zoomOffsetSec: number;
+};
+
 /* ── Helpers ───────────────────────────────────────────────────── */
 
 const DEVICE_ICONS: Record<string, string> = {
@@ -58,6 +70,17 @@ const DEVICE_ICONS: Record<string, string> = {
   i2c_sensor: "📡",
   i2s_audio: "🔊",
 };
+
+const TRACE_COLORS = [
+  "#ff6b6b",
+  "#3dd68c",
+  "#5b9cff",
+  "#f0c14a",
+  "#c084fc",
+  "#fb923c",
+  "#38bdf8",
+  "#f43f5e",
+];
 
 function deviceIcon(type: string) {
   return DEVICE_ICONS[type] || "⚙️";
@@ -78,8 +101,23 @@ export default function BoardPinsPage() {
   const [showLogs, setShowLogs] = useState(true);
   const [showGraph, setShowGraph] = useState(true);
   const [layoutPos, setLayoutPos] = useState<"bottom" | "right">("bottom");
-  const [panelSize, setPanelSize] = useState(250);
-  const [splitRatio, setSplitRatio] = useState(50);
+  const [panelSize, setPanelSize] = useState(320);
+  const [splitRatio, setSplitRatio] = useState(40);
+
+  // Plot Panes State
+  const [plotPanes, setPlotPanes] = useState<PlotPane[]>([
+    {
+      id: "plot_1",
+      title: "Plot 1",
+      bcms: [],
+      paused: false,
+      timeWindowSec: 10,
+      autoScale: true,
+      minVal: 0,
+      maxVal: 1,
+      zoomOffsetSec: 0,
+    },
+  ]);
 
   // Resize Handlers
   const startResizePanel = useCallback((e: React.MouseEvent) => {
@@ -88,11 +126,11 @@ export default function BoardPinsPage() {
     const startPos = layoutPos === "bottom" ? e.clientY : e.clientX;
     const onMove = (ev: MouseEvent) => {
       if (layoutPos === "bottom") {
-        const delta = startPos - ev.clientY; // moving mouse up increases size
-        setPanelSize(Math.max(100, Math.min(startSize + delta, window.innerHeight - 200)));
+        const delta = startPos - ev.clientY;
+        setPanelSize(Math.max(120, Math.min(startSize + delta, window.innerHeight - 150)));
       } else {
-        const delta = startPos - ev.clientX; // moving mouse left increases size
-        setPanelSize(Math.max(200, Math.min(startSize + delta, window.innerWidth - 350)));
+        const delta = startPos - ev.clientX;
+        setPanelSize(Math.max(250, Math.min(startSize + delta, window.innerWidth - 300)));
       }
     };
     const onUp = () => {
@@ -108,7 +146,7 @@ export default function BoardPinsPage() {
   const startResizeSplit = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startRatio = splitRatio;
-    const isRow = layoutPos === "bottom"; // side-by-side
+    const isRow = layoutPos === "bottom";
     const startPos = isRow ? e.clientX : e.clientY;
     const container = (e.target as HTMLElement).parentElement;
     const totalSize = isRow ? container?.clientWidth || window.innerWidth : container?.clientHeight || window.innerHeight;
@@ -130,7 +168,6 @@ export default function BoardPinsPage() {
 
   // Probe graph data: bcm → last N samples
   const probeBuf = useRef<Record<number, ProbeSample[]>>({});
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // ── Fetch boards + pinout ──────────────────────────────────────
@@ -173,8 +210,7 @@ export default function BoardPinsPage() {
           const buf = probeBuf.current;
           if (!buf[sample.bcm]) buf[sample.bcm] = [];
           buf[sample.bcm].push(sample);
-          // Keep last 500 samples per pin
-          if (buf[sample.bcm].length > 500) buf[sample.bcm] = buf[sample.bcm].slice(-500);
+          if (buf[sample.bcm].length > 1000) buf[sample.bcm] = buf[sample.bcm].slice(-1000);
         } catch {}
       };
       ws.onclose = () => { if (!closed) setTimeout(connect, 2000); };
@@ -204,84 +240,6 @@ export default function BoardPinsPage() {
 
   // Auto-scroll logs
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
-
-  // ── Draw signal graph ──────────────────────────────────────────
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let raf = 0;
-    const draw = () => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
-      const W = rect.width, H = rect.height;
-
-      ctx.fillStyle = "#0e1116";
-      ctx.fillRect(0, 0, W, H);
-
-      // Grid lines
-      ctx.strokeStyle = "#1a2130";
-      ctx.lineWidth = 1;
-      for (let y = 0; y < H; y += H / 4) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-      }
-      for (let x = 0; x < W; x += W / 10) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      }
-
-      const colors = ["#3dd68c", "#5b9cff", "#f0c14a", "#ff6b6b", "#c084fc", "#fb923c"];
-      const buf = probeBuf.current;
-      const probingPins = Object.keys(buf).map(Number).filter(b => buf[b].length > 0);
-      const now = Date.now() / 1000;
-      const windowSec = 10;
-
-      if (probingPins.length === 0) {
-        ctx.fillStyle = "#8b98ad";
-        ctx.font = "13px system-ui";
-        ctx.textAlign = "center";
-        ctx.fillText("Enable probe on an input pin to see its signal", W / 2, H / 2);
-      }
-
-      const laneH = probingPins.length > 0 ? (H - 20) / probingPins.length : H;
-
-      probingPins.forEach((bcm, i) => {
-        const samples = buf[bcm];
-        if (!samples.length) return;
-        const color = colors[i % colors.length];
-        const yBase = 10 + i * laneH;
-        const yH = laneH - 4;
-
-        // Label
-        ctx.fillStyle = color;
-        ctx.font = "11px system-ui";
-        ctx.textAlign = "left";
-        ctx.fillText(`BCM${bcm}`, 4, yBase + 12);
-
-        // Draw digital waveform
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        let started = false;
-        for (const s of samples) {
-          const age = now - s.ts;
-          if (age > windowSec) continue;
-          const x = W - (age / windowSec) * W;
-          const y = yBase + yH - (s.value ? yH * 0.8 : yH * 0.15);
-          if (!started) { ctx.moveTo(x, y); started = true; }
-          else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-      });
-
-      raf = requestAnimationFrame(draw);
-    };
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-  }, []);
 
   // ── Pin maps ───────────────────────────────────────────────────
   const board = boards.find(b => b.id === pinout.board) || boards[0];
@@ -316,12 +274,10 @@ export default function BoardPinsPage() {
     });
   };
 
-  /** Set up a device pin on the live GPIO service so it works immediately. */
   const setupDeviceOnHardware = async (dev: Device) => {
     const signalPin = Number(dev.pins?.signal);
     if (isNaN(signalPin) || dev.reserved) return;
 
-    // Setup the pin direction + pull
     await fetch(apiUrl("/api/gpio/setup"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -334,7 +290,6 @@ export default function BoardPinsPage() {
       }),
     });
 
-    // For output pins, set default value
     if (dev.mode === "OUT") {
       await fetch(apiUrl("/api/gpio/write"), {
         method: "POST",
@@ -343,7 +298,6 @@ export default function BoardPinsPage() {
       });
     }
 
-    // For input pins with probe enabled, auto-start probing
     if (dev.mode === "IN" && dev.probe) {
       await fetch(apiUrl("/api/gpio/probe/start"), {
         method: "POST",
@@ -370,8 +324,17 @@ export default function BoardPinsPage() {
     });
   };
 
+  const ensurePinProbing = async (bcm: number) => {
+    if (!probingBcms.has(bcm)) {
+      await fetch(apiUrl("/api/gpio/probe/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bcm, rate_hz: 50 }),
+      });
+    }
+  };
+
   const removeDevice = async (devId: string) => {
-    // Clean up the pin from the live GPIO service
     const dev = pinout.devices.find(d => d.id === devId);
     if (dev) {
       const signalPin = Number(dev.pins?.signal);
@@ -381,6 +344,47 @@ export default function BoardPinsPage() {
     }
     const next = { ...pinout, devices: pinout.devices.filter(d => d.id !== devId) };
     await save(next);
+  };
+
+  // ── Plot Pane Controls ──────────────────────────────────────────
+  const addPlotPane = () => {
+    const num = plotPanes.length + 1;
+    setPlotPanes(prev => [
+      ...prev,
+      {
+        id: `plot_${Date.now()}`,
+        title: `Plot ${num}`,
+        bcms: [],
+        paused: false,
+        timeWindowSec: 10,
+        autoScale: true,
+        minVal: 0,
+        maxVal: 1,
+        zoomOffsetSec: 0,
+      },
+    ]);
+  };
+
+  const removePlotPane = (id: string) => {
+    if (plotPanes.length <= 1) return;
+    setPlotPanes(prev => prev.filter(p => p.id !== id));
+  };
+
+  const updatePlotPane = (id: string, patch: Partial<PlotPane>) => {
+    setPlotPanes(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)));
+  };
+
+  const addBcmToPlot = (paneId: string, bcm: number) => {
+    updatePlotPane(paneId, {
+      bcms: Array.from(new Set([...(plotPanes.find(p => p.id === paneId)?.bcms || []), bcm])),
+    });
+    ensurePinProbing(bcm);
+  };
+
+  const removeBcmFromPlot = (paneId: string, bcm: number) => {
+    const pane = plotPanes.find(p => p.id === paneId);
+    if (!pane) return;
+    updatePlotPane(paneId, { bcms: pane.bcms.filter(b => b !== bcm) });
   };
 
   // ── Pin rendering helper ───────────────────────────────────────
@@ -401,17 +405,23 @@ export default function BoardPinsPage() {
       <div
         key={p.phys}
         className={`pin-row ${isLeft ? "" : "pin-row-right"}`}
+        draggable={p.bcm != null}
+        onDragStart={(e) => {
+          if (p.bcm != null) {
+            e.dataTransfer.setData("text/plain", String(p.bcm));
+          }
+        }}
         onClick={() => p.bcm != null && setSelectedBcm(p.bcm)}
       >
         {isLeft ? (
           <>
             <span className="pin-label">{p.name}{p.bcm != null ? ` (${p.bcm})` : ""}</span>
             <span className="pin-num">{p.phys}</span>
-            <span className={cls} title={`Phys ${p.phys}${p.bcm != null ? ` / BCM ${p.bcm}` : ""}${p.alt ? ` — ${p.alt.join(", ")}` : ""}`} />
+            <span className={cls} title={`Phys ${p.phys}${p.bcm != null ? ` / BCM ${p.bcm}` : ""} — Drag into plot to graph`} />
           </>
         ) : (
           <>
-            <span className={cls} title={`Phys ${p.phys}${p.bcm != null ? ` / BCM ${p.bcm}` : ""}${p.alt ? ` — ${p.alt.join(", ")}` : ""}`} />
+            <span className={cls} title={`Phys ${p.phys}${p.bcm != null ? ` / BCM ${p.bcm}` : ""} — Drag into plot to graph`} />
             <span className="pin-num">{p.phys}</span>
             <span className="pin-label">{p.name}{p.bcm != null ? ` (${p.bcm})` : ""}</span>
           </>
@@ -425,7 +435,7 @@ export default function BoardPinsPage() {
     <div className={`page gpio-main-wrapper layout-${layoutPos}`}>
       <div className="page-title">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span>Board Pins — Live GPIO</span>
+          <span>Board Pins — Signal Workbench</span>
           <div className="layout-toggles">
             <button className={`btn ${showLogs ? "primary" : ""}`} onClick={() => setShowLogs(!showLogs)}>
               Logs
@@ -454,125 +464,156 @@ export default function BoardPinsPage() {
       <div className="gpio-flex-content">
         {/* Top half: board visual + device cards */}
         <div className="gpio-layout">
-        {/* Left: Interactive 40-pin header */}
-        <div className="panel gpio-board-panel">
-          <div className="gpio-board-title">{board?.name || "Board"}</div>
-          <div className="gpio-header">
-            <div className="gpio-col">{left.map(renderPin)}</div>
-            <div className="gpio-notch">▼</div>
-            <div className="gpio-col">{right.map(renderPin)}</div>
+          {/* Left: Interactive 40-pin header */}
+          <div className="panel gpio-board-panel">
+            <div className="gpio-board-title">{board?.name || "Board"} (Drag pin to graph)</div>
+            <div className="gpio-header">
+              <div className="gpio-col">{left.map(renderPin)}</div>
+              <div className="gpio-notch">▼</div>
+              <div className="gpio-col">{right.map(renderPin)}</div>
+            </div>
+            <div className="gpio-legend">
+              <span><span className="pin-dot power" style={{ display: "inline-block", width: 10, height: 10 }} /> Power</span>
+              <span><span className="pin-dot gnd" style={{ display: "inline-block", width: 10, height: 10 }} /> GND</span>
+              <span><span className="pin-dot gpio" style={{ display: "inline-block", width: 10, height: 10 }} /> GPIO</span>
+              <span><span className="pin-dot used" style={{ display: "inline-block", width: 10, height: 10 }} /> In Use</span>
+              <span><span className="pin-dot probing" style={{ display: "inline-block", width: 10, height: 10 }} /> Probing</span>
+            </div>
           </div>
-          <div className="gpio-legend">
-            <span><span className="pin-dot power" style={{ display: "inline-block", width: 10, height: 10 }} /> Power</span>
-            <span><span className="pin-dot gnd" style={{ display: "inline-block", width: 10, height: 10 }} /> GND</span>
-            <span><span className="pin-dot gpio" style={{ display: "inline-block", width: 10, height: 10 }} /> GPIO</span>
-            <span><span className="pin-dot used" style={{ display: "inline-block", width: 10, height: 10 }} /> In Use</span>
-            <span><span className="pin-dot probing" style={{ display: "inline-block", width: 10, height: 10 }} /> Probing</span>
-          </div>
-        </div>
 
-        {/* Right: Device cards */}
-        <div className="panel gpio-devices-panel">
-          <div className="gpio-devices-scroll">
-            {(pinout.devices || []).length === 0 && (
-              <div className="placeholder">No devices configured. Click "+ Add Device" to start.</div>
-            )}
-            {(pinout.devices || []).map(dev => {
-              const signalPin = Number(dev.pins?.signal);
-              const gs = !isNaN(signalPin) ? gpioMap[signalPin] : undefined;
-              const isOutput = dev.mode === "OUT";
-              const isReserved = dev.reserved;
+          {/* Right: Device cards */}
+          <div className="panel gpio-devices-panel">
+            <div className="gpio-devices-scroll">
+              {(pinout.devices || []).length === 0 && (
+                <div className="placeholder">No devices configured. Click "+ Add Device" to start.</div>
+              )}
+              {(pinout.devices || []).map(dev => {
+                const signalPin = Number(dev.pins?.signal);
+                const gs = !isNaN(signalPin) ? gpioMap[signalPin] : undefined;
+                const isOutput = dev.mode === "OUT";
+                const isReserved = dev.reserved;
 
-              return (
-                <div key={dev.id} className={`device-card ${isReserved ? "reserved" : ""}`}>
-                  <div className="device-header">
-                    <span className="device-icon">{deviceIcon(dev.type)}</span>
-                    <div className="device-info">
-                      <strong>{dev.label || dev.id}</strong>
-                      <span className="muted">{dev.type} — {Object.entries(dev.pins || {}).map(([k, v]) => `${k}:${v}`).join(", ")}</span>
+                return (
+                  <div
+                    key={dev.id}
+                    className={`device-card ${isReserved ? "reserved" : ""}`}
+                    draggable={!isNaN(signalPin)}
+                    onDragStart={(e) => {
+                      if (!isNaN(signalPin)) {
+                        e.dataTransfer.setData("text/plain", String(signalPin));
+                      }
+                    }}
+                  >
+                    <div className="device-header">
+                      <span className="device-icon">{deviceIcon(dev.type)}</span>
+                      <div className="device-info">
+                        <strong>{dev.label || dev.id}</strong>
+                        <span className="muted">{dev.type} — {Object.entries(dev.pins || {}).map(([k, v]) => `${k}:${v}`).join(", ")}</span>
+                      </div>
+                      {!isReserved && (
+                        <button className="btn danger" style={{ padding: "2px 8px", fontSize: 11 }}
+                          onClick={() => removeDevice(dev.id)}>✕</button>
+                      )}
                     </div>
-                    {!isReserved && (
-                      <button className="btn danger" style={{ padding: "2px 8px", fontSize: 11 }}
-                        onClick={() => removeDevice(dev.id)}>✕</button>
-                    )}
+
+                    {isReserved ? (
+                      <div className="device-reserved">Reserved — {dev.mode}</div>
+                    ) : isOutput && gs ? (
+                      <div className="device-controls">
+                        <button
+                          className={`toggle-switch ${gs.value ? "on" : ""}`}
+                          onClick={() => togglePin(signalPin, gs.value)}
+                        >
+                          <span className="toggle-knob" />
+                        </button>
+                        <span className={`value-badge ${gs.value ? "high" : "low"}`}>
+                          {gs.value ? "HIGH" : "LOW"}
+                        </span>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: "2px 6px" }}
+                          onClick={() => addBcmToPlot(plotPanes[0].id, signalPin)}
+                        >
+                          + Graph
+                        </button>
+                      </div>
+                    ) : !isOutput && !isReserved ? (
+                      <div className="device-controls">
+                        <span className={`value-badge ${gs?.value ? "high" : "low"}`}>
+                          {gs ? (gs.value ? "HIGH" : "LOW") : "—"}
+                        </span>
+                        <button
+                          className={`btn ${gs?.probing ? "danger" : "primary"}`}
+                          style={{ fontSize: 12, padding: "3px 10px" }}
+                          onClick={() => !isNaN(signalPin) && toggleProbe(signalPin, !!gs?.probing)}
+                        >
+                          {gs?.probing ? "■ Stop Probe" : "▶ Probe"}
+                        </button>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: "2px 6px" }}
+                          onClick={() => !isNaN(signalPin) && addBcmToPlot(plotPanes[0].id, signalPin)}
+                        >
+                          + Graph
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-
-                  {isReserved ? (
-                    <div className="device-reserved">Reserved — {dev.mode}</div>
-                  ) : isOutput && gs ? (
-                    <div className="device-controls">
-                      <button
-                        className={`toggle-switch ${gs.value ? "on" : ""}`}
-                        onClick={() => togglePin(signalPin, gs.value)}
-                      >
-                        <span className="toggle-knob" />
-                      </button>
-                      <span className={`value-badge ${gs.value ? "high" : "low"}`}>
-                        {gs.value ? "HIGH" : "LOW"}
-                      </span>
-                    </div>
-                  ) : !isOutput && !isReserved ? (
-                    <div className="device-controls">
-                      <span className={`value-badge ${gs?.value ? "high" : "low"}`}>
-                        {gs ? (gs.value ? "HIGH" : "LOW") : "—"}
-                      </span>
-                      <button
-                        className={`btn ${gs?.probing ? "danger" : "primary"}`}
-                        style={{ fontSize: 12, padding: "3px 10px" }}
-                        onClick={() => !isNaN(signalPin) && toggleProbe(signalPin, !!gs?.probing)}
-                      >
-                        {gs?.probing ? "■ Stop Probe" : "▶ Probe"}
-                      </button>
-                    </div>
-                  ) : !isReserved ? (
-                    <div className="device-controls">
-                      <span className="muted">Start gpio.pins node to control</span>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Main Panel Resizer */}
-      {(showLogs || showGraph) && (
-        <div 
-          className={`resize-handle-main ${layoutPos}`} 
-          onMouseDown={startResizePanel}
-        />
-      )}
+        {/* Main Panel Resizer */}
+        {(showLogs || showGraph) && (
+          <div 
+            className={`resize-handle-main ${layoutPos}`} 
+            onMouseDown={startResizePanel}
+          />
+        )}
 
-      {/* Panels Area: Logs + Signal Graph */}
-      {(showLogs || showGraph) && (
-        <div 
-          className={`gpio-panels-container ${layoutPos}`}
-          style={{ [layoutPos === "bottom" ? "height" : "width"]: panelSize }}
-        >
-          {showLogs && (
-            <div className="panel gpio-log-panel" style={{ flex: showGraph ? `${splitRatio}` : '1' }}>
-              <div className="gpio-section-title">GPIO Log</div>
-              <div className="gpio-log-scroll">
-                {logs.length === 0 && <div className="placeholder" style={{ padding: 12 }}>No log entries yet</div>}
-                {logs.map((l, i) => <div key={i} className="gpio-log-line">{l}</div>)}
-                <div ref={logsEndRef} />
+        {/* Panels Area: Logs + Signal Graph */}
+        {(showLogs || showGraph) && (
+          <div 
+            className={`gpio-panels-container ${layoutPos}`}
+            style={{ [layoutPos === "bottom" ? "height" : "width"]: panelSize }}
+          >
+            {showLogs && (
+              <div className="panel gpio-log-panel" style={{ flex: showGraph ? `${splitRatio}` : '1' }}>
+                <div className="gpio-section-title">GPIO Log</div>
+                <div className="gpio-log-scroll">
+                  {logs.length === 0 && <div className="placeholder" style={{ padding: 12 }}>No log entries yet</div>}
+                  {logs.map((l, i) => <div key={i} className="gpio-log-line">{l}</div>)}
+                  <div ref={logsEndRef} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {showLogs && showGraph && (
-            <div className={`resize-handle-split ${layoutPos}`} onMouseDown={startResizeSplit} />
-          )}
+            {showLogs && showGraph && (
+              <div className={`resize-handle-split ${layoutPos}`} onMouseDown={startResizeSplit} />
+            )}
 
-          {showGraph && (
-            <div className="panel gpio-graph-panel" style={{ flex: showLogs ? `${100 - splitRatio}` : '1' }}>
-              <div className="gpio-section-title">Signal Graph (10s window)</div>
-              <canvas ref={canvasRef} className="gpio-canvas" />
-            </div>
-          )}
-        </div>
-      )}
+            {showGraph && (
+              <div className="panel gpio-graph-panel" style={{ flex: showLogs ? `${100 - splitRatio}` : '1' }}>
+                {plotPanes.map((pane) => (
+                  <PlotPaneView
+                    key={pane.id}
+                    pane={pane}
+                    probeBuf={probeBuf}
+                    gpioMap={gpioMap}
+                    canClose={plotPanes.length > 1}
+                    onUpdate={(patch) => updatePlotPane(pane.id, patch)}
+                    onClose={() => removePlotPane(pane.id)}
+                    onAddPane={addPlotPane}
+                    onAddBcm={(bcm) => addBcmToPlot(pane.id, bcm)}
+                    onRemoveBcm={(bcm) => removeBcmFromPlot(pane.id, bcm)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Add Device Modal */}
@@ -586,6 +627,407 @@ export default function BoardPinsPage() {
           onClose={() => setShowAddModal(false)}
         />
       )}
+    </div>
+  );
+}
+
+/* ── Interactive Plot Pane Component ───────────────────────────── */
+
+function PlotPaneView({
+  pane,
+  probeBuf,
+  gpioMap,
+  canClose,
+  onUpdate,
+  onClose,
+  onAddPane,
+  onAddBcm,
+  onRemoveBcm,
+}: {
+  pane: PlotPane;
+  probeBuf: React.MutableRefObject<Record<number, ProbeSample[]>>;
+  gpioMap: Record<number, PinApiState>;
+  canClose: boolean;
+  onUpdate: (patch: Partial<PlotPane>) => void;
+  onClose: () => void;
+  onAddPane: () => void;
+  onAddBcm: (bcm: number) => void;
+  onRemoveBcm: (bcm: number) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; ts: number; values: Record<number, number> } | null>(null);
+  const isDraggingTime = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartOffset = useRef(0);
+
+  // Active BCMS: explicitly added to pane, or if none added, automatically show probing pins
+  const activeBcms = useMemo(() => {
+    if (pane.bcms.length > 0) return pane.bcms;
+    const buf = probeBuf.current;
+    return Object.keys(buf).map(Number).filter(b => buf[b]?.length > 0);
+  }, [pane.bcms, probeBuf]);
+
+  // Canvas render loop
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let raf = 0;
+
+    const draw = () => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+      const W = rect.width, H = rect.height;
+
+      // Dark background
+      ctx.fillStyle = "#090c10";
+      ctx.fillRect(0, 0, W, H);
+
+      const paddingLeft = 45;
+      const paddingRight = 15;
+      const paddingTop = 15;
+      const paddingBottom = 32;
+      const graphW = W - paddingLeft - paddingRight;
+      const graphH = H - paddingTop - paddingBottom;
+
+      // Draw grid background
+      ctx.strokeStyle = "#161d28";
+      ctx.lineWidth = 1;
+
+      // Horizontal scale grid
+      const yTicks = 4;
+      for (let i = 0; i <= yTicks; i++) {
+        const y = paddingTop + (i / yTicks) * graphH;
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft, y);
+        ctx.lineTo(W - paddingRight, y);
+        ctx.stroke();
+
+        // Y-axis value labels
+        ctx.fillStyle = "#586579";
+        ctx.font = "10px IBM Plex Mono, monospace";
+        ctx.textAlign = "right";
+        const val = pane.autoScale
+          ? (1 - i / yTicks).toFixed(1)
+          : (pane.maxVal - (i / yTicks) * (pane.maxVal - pane.minVal)).toFixed(1);
+        ctx.fillText(String(val), paddingLeft - 6, y + 3);
+      }
+
+      // Vertical time grid (10 columns)
+      const xTicks = 10;
+      const now = Date.now() / 1000;
+      const effNow = pane.paused ? now - pane.zoomOffsetSec : now;
+
+      for (let i = 0; i <= xTicks; i++) {
+        const x = paddingLeft + (i / xTicks) * graphW;
+        ctx.beginPath();
+        ctx.moveTo(x, paddingTop);
+        ctx.lineTo(x, H - paddingBottom);
+        ctx.stroke();
+
+        // Dual Timestamps on X-Axis
+        const ageSec = pane.timeWindowSec * (1 - i / xTicks) + pane.zoomOffsetSec;
+        const absTime = new Date((effNow - ageSec) * 1000);
+        const relLabel = ageSec === 0 ? "0.0s" : `-${ageSec.toFixed(1)}s`;
+        const absLabel = absTime.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        ctx.fillStyle = "#6e7d96";
+        ctx.font = "9px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText(relLabel, x, H - paddingBottom + 12);
+        ctx.fillStyle = "#48566b";
+        ctx.font = "8px IBM Plex Mono, monospace";
+        ctx.fillText(absLabel, x, H - paddingBottom + 22);
+      }
+
+      // If no active signals
+      if (activeBcms.length === 0) {
+        ctx.fillStyle = "#8b98ad";
+        ctx.font = "12px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText("Drag & drop pins here or start probing to graph signal", W / 2, H / 2);
+      }
+
+      // Draw Waveforms
+      const buf = probeBuf.current;
+      const numLanes = activeBcms.length;
+      const laneH = numLanes > 1 ? graphH / numLanes : graphH;
+
+      activeBcms.forEach((bcm, idx) => {
+        const samples = buf[bcm] || [];
+        const color = TRACE_COLORS[idx % TRACE_COLORS.length];
+        const yTop = paddingTop + idx * laneH;
+        const currentH = numLanes > 1 ? laneH - 6 : laneH;
+
+        // Draw waveform path
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+
+        for (const s of samples) {
+          const ageSec = effNow - s.ts;
+          if (ageSec < 0 || ageSec > pane.timeWindowSec + pane.zoomOffsetSec) continue;
+
+          const normX = 1 - (ageSec - pane.zoomOffsetSec) / pane.timeWindowSec;
+          if (normX < 0 || normX > 1) continue;
+
+          const x = paddingLeft + normX * graphW;
+          let normY = s.value;
+          if (!pane.autoScale && pane.maxVal !== pane.minVal) {
+            normY = (s.value - pane.minVal) / (pane.maxVal - pane.minVal);
+          }
+          normY = Math.max(0, Math.min(1, normY));
+
+          const y = numLanes > 1
+            ? yTop + currentH - normY * currentH * 0.75 - currentH * 0.12
+            : paddingTop + graphH - normY * graphH * 0.85 - graphH * 0.07;
+
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+
+        // Draw data points
+        ctx.fillStyle = color;
+        for (const s of samples) {
+          const ageSec = effNow - s.ts;
+          if (ageSec < 0 || ageSec > pane.timeWindowSec + pane.zoomOffsetSec) continue;
+          const normX = 1 - (ageSec - pane.zoomOffsetSec) / pane.timeWindowSec;
+          if (normX < 0 || normX > 1) continue;
+          const x = paddingLeft + normX * graphW;
+          let normY = s.value;
+          if (!pane.autoScale && pane.maxVal !== pane.minVal) {
+            normY = (s.value - pane.minVal) / (pane.maxVal - pane.minVal);
+          }
+          normY = Math.max(0, Math.min(1, normY));
+          const y = numLanes > 1
+            ? yTop + currentH - normY * currentH * 0.75 - currentH * 0.12
+            : paddingTop + graphH - normY * graphH * 0.85 - graphH * 0.07;
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+
+      // Draw hover crosshair cursor if active
+      if (hoverInfo && hoverInfo.x >= paddingLeft && hoverInfo.x <= W - paddingRight) {
+        ctx.strokeStyle = "#5b9cff";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(hoverInfo.x, paddingTop);
+        ctx.lineTo(hoverInfo.x, H - paddingBottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      if (!pane.paused) raf = requestAnimationFrame(draw);
+    };
+
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, [pane, activeBcms, probeBuf, hoverInfo]);
+
+  // Drop Handlers
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const bcmStr = e.dataTransfer.getData("text/plain");
+    const bcm = Number(bcmStr);
+    if (!isNaN(bcm)) {
+      onAddBcm(bcm);
+    }
+  };
+
+  // Zoom & Pan Mouse Events
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 2 : -2;
+    const nextSec = Math.max(2, Math.min(120, pane.timeWindowSec + delta));
+    onUpdate({ timeWindowSec: nextSec });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isDraggingTime.current = true;
+    dragStartX.current = e.clientX;
+    dragStartOffset.current = pane.zoomOffsetSec;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (isDraggingTime.current) {
+      const dx = e.clientX - dragStartX.current;
+      const secShift = (dx / rect.width) * pane.timeWindowSec;
+      onUpdate({ zoomOffsetSec: Math.max(0, dragStartOffset.current - secShift) });
+    }
+
+    setHoverInfo({ x, y, ts: Date.now(), values: {} });
+  };
+
+  const handleMouseUp = () => {
+    isDraggingTime.current = false;
+  };
+
+  return (
+    <div className="gpio-graph-panel" style={{ flex: 1 }}>
+      {/* Header Toolbar */}
+      <div className="plot-header">
+        <div className="plot-header-title">
+          <span>📊 {pane.title}</span>
+          <span className="muted" style={{ fontSize: 10 }}>({pane.timeWindowSec}s window)</span>
+        </div>
+        <div className="plot-toolbar">
+          <button
+            className={`plot-toolbar-btn ${pane.paused ? "active" : ""}`}
+            onClick={() => onUpdate({ paused: !pane.paused })}
+            title={pane.paused ? "Play real-time stream" : "Pause stream"}
+          >
+            {pane.paused ? "▶ Play" : "⏸ Pause"}
+          </button>
+          <select
+            className="plot-toolbar-btn"
+            value={pane.timeWindowSec}
+            onChange={(e) => onUpdate({ timeWindowSec: Number(e.target.value) })}
+          >
+            <option value={5}>5s</option>
+            <option value={10}>10s</option>
+            <option value={30}>30s</option>
+            <option value={60}>60s</option>
+          </select>
+          <button
+            className="plot-toolbar-btn"
+            onClick={() => onUpdate({ zoomOffsetSec: 0, timeWindowSec: 10 })}
+            title="Reset Zoom / Pan"
+          >
+            ↺ Reset
+          </button>
+          <button
+            className="plot-toolbar-btn"
+            onClick={onAddPane}
+            title="Add another Plot Pane"
+          >
+            + Add Plot
+          </button>
+          {canClose && (
+            <button
+              className="plot-toolbar-btn"
+              style={{ color: "var(--danger)" }}
+              onClick={onClose}
+              title="Close Plot"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Body: Canvas + Trace Controls Sidebar */}
+      <div className="plot-body">
+        <div
+          className={`gpio-canvas-wrapper ${isDragOver ? "drag-over" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={() => { isDraggingTime.current = false; setHoverInfo(null); }}
+        >
+          <canvas ref={canvasRef} className="gpio-canvas" />
+        </div>
+
+        {/* Trace Legend & Scale Controls Sidebar */}
+        <div className="plot-sidebar">
+          <div className="plot-sidebar-section">
+            <div className="plot-sidebar-title">Mapped Pin Traces</div>
+            {activeBcms.length === 0 && (
+              <div className="muted" style={{ fontStyle: "italic", fontSize: 10 }}>
+                No pins mapped. Drag pins here or click "+ Graph" on a device card.
+              </div>
+            )}
+            {activeBcms.map((bcm, idx) => {
+              const color = TRACE_COLORS[idx % TRACE_COLORS.length];
+              const gs = gpioMap[bcm];
+              return (
+                <div key={bcm} className="plot-trace-badge">
+                  <div className="plot-trace-info">
+                    <span className="plot-trace-dot" style={{ background: color }} />
+                    <strong>BCM {bcm}</strong>
+                  </div>
+                  <span className="plot-trace-val" style={{ color }}>
+                    {gs ? (gs.value ? "HIGH (1)" : "LOW (0)") : "—"}
+                  </span>
+                  {pane.bcms.includes(bcm) && (
+                    <button
+                      className="btn danger"
+                      style={{ padding: "0 4px", fontSize: 10, lineHeight: "14px" }}
+                      onClick={() => onRemoveBcm(bcm)}
+                      title="Remove pin trace"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="plot-sidebar-section" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+            <div className="plot-sidebar-title">Scale Settings</div>
+            <label className="toggle-switch-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span>Auto min/max</span>
+              <button
+                className={`toggle-switch ${pane.autoScale ? "on" : ""}`}
+                style={{ width: 32, height: 18 }}
+                onClick={() => onUpdate({ autoScale: !pane.autoScale })}
+              >
+                <span className="toggle-knob" style={{ width: 12, height: 12, top: 2, left: pane.autoScale ? 16 : 2 }} />
+              </button>
+            </label>
+
+            {!pane.autoScale && (
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <div style={{ flex: 1 }}>
+                  <span className="muted" style={{ fontSize: 9 }}>Min:</span>
+                  <input
+                    type="number"
+                    className="plot-scale-input"
+                    value={pane.minVal}
+                    onChange={(e) => onUpdate({ minVal: Number(e.target.value) })}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <span className="muted" style={{ fontSize: 9 }}>Max:</span>
+                  <input
+                    type="number"
+                    className="plot-scale-input"
+                    value={pane.maxVal}
+                    onChange={(e) => onUpdate({ maxVal: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

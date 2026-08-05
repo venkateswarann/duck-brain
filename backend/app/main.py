@@ -21,6 +21,7 @@ from .nodes.motors_telemetry import MotorsTelemetryNode
 from .nodes.script_node import discover_script_nodes
 from .nodes.system_metrics import SystemMetricsNode
 from .nodes.video_capture import VideoCaptureNode
+from .routes import ai as ai_routes
 from .routes import api as api_routes
 from .routes import gpio as gpio_routes
 from .routes import nodes as nodes_routes
@@ -97,6 +98,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.include_router(ai_routes.router)
     app.include_router(api_routes.router)
     app.include_router(gpio_routes.router)
     app.include_router(nodes_routes.router)

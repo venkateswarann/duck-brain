@@ -97,6 +97,7 @@ export default function ScriptsPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [modal, setModal] = useState<Modal | null>(null);
   const [status, setStatus] = useState<{ kind: "info" | "error"; text: string } | null>(null);
+  const [showCopilot, setShowCopilot] = useState(true);
 
   const nodes = useMemo(() => collectFiles(tree), [tree]);
   const current = selected ? nodes.get(selected) : undefined;
@@ -407,10 +408,17 @@ export default function ScriptsPage() {
           <button className="btn danger" onClick={stop} disabled={!running}>
             Stop
           </button>
+          <button
+            className={`btn ${showCopilot ? "primary" : ""}`}
+            onClick={() => setShowCopilot(!showCopilot)}
+            title="Toggle AI Script Copilot Drawer"
+          >
+            🤖 AI Copilot
+          </button>
         </div>
       </div>
 
-      <div className="split" style={{ gridTemplateColumns: "290px 1fr", flex: 1 }}>
+      <div className="split" style={{ gridTemplateColumns: showCopilot ? "240px 1fr 380px" : "290px 1fr", flex: 1 }}>
         <div className="panel">
           <div className="tree">
             {tree?.children?.length ? (
@@ -478,6 +486,19 @@ export default function ScriptsPage() {
             {logs.join("\n") || "(no output yet — press Run)"}
           </div>
         </div>
+
+        {showCopilot && (
+          <AiCopilotDrawer
+            selectedPath={selected}
+            currentContent={content}
+            onApplyContent={(newCode) => {
+              setContent(newCode);
+              setDirty(true);
+              notify("info", "Applied AI generated code to editor");
+            }}
+            onClose={() => setShowCopilot(false)}
+          />
+        )}
       </div>
 
       {modal && (
@@ -699,3 +720,221 @@ function ModalHost({
     </div>
   );
 }
+
+/* ── AI Copilot Drawer Component ────────────────────────────── */
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  reasoning?: string;
+};
+
+function AiCopilotDrawer({
+  selectedPath,
+  currentContent,
+  onApplyContent,
+  onClose,
+}: {
+  selectedPath: string | null;
+  currentContent: string;
+  onApplyContent: (code: string) => void;
+  onClose: () => void;
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: "assistant",
+      content:
+        "Hello! I am your DCS AI Script Copilot. Ask me to write, explain, or debug Python scripts for Open Duck Mini.",
+    },
+  ]);
+  const [inputPrompt, setInputPrompt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  const sendPrompt = async (customText?: string) => {
+    const text = (customText || inputPrompt).trim();
+    if (!text || loading) return;
+
+    const newHistory: ChatMessage[] = [...messages, { role: "user", content: text }];
+    setMessages(newHistory);
+    setInputPrompt("");
+    setLoading(true);
+
+    try {
+      const res = await fetch(apiUrl("/api/ai/chat"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: text,
+          current_script: currentContent,
+          script_path: selectedPath,
+          history: messages.slice(-6).map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Error calling AI endpoint");
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.content || "No response content returned.",
+          reasoning: data.reasoning,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `⚠️ Error: ${err.message || err}. Please verify LLM Agent configuration in Settings.`,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const extractCodeBlocks = (text: string): { text: string; codeBlocks: string[] } => {
+    const regex = /```(?:python|py)?\n([\s\S]*?)```/g;
+    const blocks: string[] = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      blocks.push(match[1].trim());
+    }
+    return { text, codeBlocks: blocks };
+  };
+
+  return (
+    <div className="ai-copilot-drawer">
+      {/* Header */}
+      <div className="ai-copilot-header">
+        <div className="ai-copilot-title">
+          <span>🤖 AI Script Copilot</span>
+          <span className="calib-status calibrated" style={{ fontSize: 9 }}>
+            Active
+          </span>
+        </div>
+        <button
+          className="btn"
+          style={{ padding: "1px 6px", fontSize: 11 }}
+          onClick={onClose}
+          title="Close Copilot Drawer"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Quick Action Chips */}
+      <div className="ai-chips-row">
+        <button
+          className="ai-chip"
+          onClick={() => sendPrompt("Explain this script and how it controls the robot.")}
+        >
+          ⚡ Explain Script
+        </button>
+        <button
+          className="ai-chip"
+          onClick={() => sendPrompt("Check this script for bugs, error handling, or performance issues and fix it.")}
+        >
+          🐛 Debug & Fix
+        </button>
+        <button
+          className="ai-chip"
+          onClick={() => sendPrompt("Write a script that moves head_yaw and head_pitch in a smooth wave motion pattern.")}
+        >
+          🦾 Wave Motion
+        </button>
+        <button
+          className="ai-chip"
+          onClick={() => sendPrompt("Write a python script that continuously reads motor voltage, current, and temperature and logs telemetry.")}
+        >
+          📊 Telemetry Logger
+        </button>
+      </div>
+
+      {/* Messages Feed */}
+      <div className="ai-chat-messages">
+        {messages.map((m, idx) => {
+          const isUser = m.role === "user";
+          const { codeBlocks } = !isUser ? extractCodeBlocks(m.content) : { codeBlocks: [] };
+
+          return (
+            <div key={idx} className={`ai-msg ${isUser ? "user" : "assistant"}`}>
+              {/* Reasoning / Thinking Box */}
+              {m.reasoning && (
+                <details className="ai-reasoning-box" open={false}>
+                  <summary className="ai-reasoning-summary">
+                    🧠 Model Thinking Process ({m.reasoning.length} chars)
+                  </summary>
+                  <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{m.reasoning}</div>
+                </details>
+              )}
+
+              {/* Main Content Bubble */}
+              <div className="ai-msg-bubble">{m.content}</div>
+
+              {/* Code Actions for Code Blocks */}
+              {codeBlocks.map((code, cIdx) => (
+                <div key={cIdx} className="ai-code-block">
+                  <div className="ai-code-header">
+                    <span>Python Code</span>
+                    <button
+                      className="btn primary"
+                      style={{ padding: "2px 8px", fontSize: 10 }}
+                      onClick={() => onApplyContent(code)}
+                      title="Apply code to active editor script"
+                    >
+                      📝 Apply to Editor
+                    </button>
+                  </div>
+                  <pre className="ai-code-pre">{code}</pre>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        {loading && (
+          <div className="ai-msg assistant">
+            <div className="ai-msg-bubble muted" style={{ fontStyle: "italic" }}>
+              ⏳ Generating response & thinking...
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input Box */}
+      <div className="ai-chat-input-box">
+        <textarea
+          className="ai-chat-textarea"
+          placeholder="Ask AI Copilot to write or edit script... (Enter to send)"
+          value={inputPrompt}
+          onChange={(e) => setInputPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendPrompt();
+            }
+          }}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            className="btn primary"
+            disabled={!inputPrompt.trim() || loading}
+            onClick={() => sendPrompt()}
+            style={{ fontSize: 11, padding: "4px 12px" }}
+          >
+            {loading ? "Thinking..." : "Send Prompt ↵"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

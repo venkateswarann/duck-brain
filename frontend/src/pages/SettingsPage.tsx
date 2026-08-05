@@ -33,6 +33,12 @@ const EDITABLE = [
   "allow_script_runner",
   "allow_web_terminal",
   "mcp_dev_mode",
+  "llm_provider",
+  "llm_endpoint",
+  "llm_api_key",
+  "llm_model",
+  "llm_temperature",
+  "llm_max_tokens",
 ] as const;
 
 const SETTING_GROUPS = [
@@ -44,6 +50,7 @@ const SETTING_GROUPS = [
   "Nodes",
   "Control",
   "Security",
+  "LLM Agent",
   "Raw JSON",
 ];
 
@@ -493,11 +500,21 @@ export default function SettingsPage() {
             </>
           )}
 
+          {/* LLM Agent Panel */}
+          {group === "LLM Agent" && draft && (
+            <LlmSettingsSection
+              draft={draft}
+              setField={setField}
+              saveConfig={save}
+            />
+          )}
+
           {/* Standard parameter groups */}
           {group !== "Joints" &&
             group !== "UI scales" &&
             group !== "Nodes" &&
             group !== "Control" &&
+            group !== "LLM Agent" &&
             group !== "Raw JSON" &&
             paramsInGroup.map((p) => {
               const editable = EDITABLE.includes(
@@ -591,3 +608,170 @@ export default function SettingsPage() {
     </div>
   );
 }
+
+function LlmSettingsSection({
+  draft,
+  setField,
+  saveConfig,
+}: {
+  draft: Record<string, any>;
+  setField: (key: string, value: any) => void;
+  saveConfig: () => void;
+}) {
+  const [showKey, setShowKey] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const providerPresets: Record<string, { endpoint: string; model: string }> = {
+    nvidia: {
+      endpoint: "https://integrate.api.nvidia.com/v1",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+    },
+    ollama: {
+      endpoint: "http://localhost:11434/v1",
+      model: "qwen2.5-coder",
+    },
+    openai: {
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+    },
+    custom: {
+      endpoint: draft.llm_endpoint || "http://localhost:8000/v1",
+      model: draft.llm_model || "custom-model",
+    },
+  };
+
+  const handleProviderSelect = (prov: string) => {
+    setField("llm_provider", prov);
+    if (providerPresets[prov]) {
+      setField("llm_endpoint", providerPresets[prov].endpoint);
+      setField("llm_model", providerPresets[prov].model);
+    }
+  };
+
+  const runTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      // Auto save draft first so backend gets current endpoint & key
+      await saveConfig();
+      const res = await fetch(apiUrl("/api/ai/test"), { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        setTestResult({ ok: true, msg: `Connected! Reply from model (${data.model}): "${data.reply}"` });
+      } else {
+        setTestResult({ ok: false, msg: data.error || "Connection failed" });
+      }
+    } catch (err: any) {
+      setTestResult({ ok: false, msg: String(err.message || err) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 style={{ marginTop: 0 }}>🤖 LLM Agent & Script Assistant Setup</h3>
+      <p className="muted" style={{ marginBottom: 16 }}>
+        Configure an LLM provider endpoint (NVIDIA NIM, Ollama, OpenAI, or Custom server) to enable the AI Script Copilot in the Scripts page.
+      </p>
+
+      <div className="settings-param">
+        <div className="settings-param-header">
+          <code style={{ color: "var(--accent)" }}>llm_provider</code>
+          <span className="muted" style={{ fontSize: 12 }}>Provider Preset</span>
+        </div>
+        <div style={{ margin: "6px 0" }}>Choose LLM Provider Preset</div>
+        <select
+          className="settings-input"
+          value={draft.llm_provider || "nvidia"}
+          onChange={(e) => handleProviderSelect(e.target.value)}
+        >
+          <option value="nvidia">NVIDIA NIM (nvidia/nemotron-3-ultra-550b-a55b)</option>
+          <option value="ollama">Ollama (Local / Robot Endpoint)</option>
+          <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+          <option value="custom">Custom OpenAI-compatible API</option>
+        </select>
+      </div>
+
+      <div className="settings-param">
+        <div className="settings-param-header">
+          <code style={{ color: "var(--accent)" }}>llm_endpoint</code>
+          <span className="muted" style={{ fontSize: 12 }}>Base URL</span>
+        </div>
+        <div style={{ margin: "6px 0" }}>Base URL Endpoint (OpenAI format)</div>
+        <input
+          className="settings-input"
+          type="text"
+          value={draft.llm_endpoint || ""}
+          onChange={(e) => setField("llm_endpoint", e.target.value)}
+          placeholder="https://integrate.api.nvidia.com/v1"
+        />
+      </div>
+
+      <div className="settings-param">
+        <div className="settings-param-header">
+          <code style={{ color: "var(--accent)" }}>llm_model</code>
+          <span className="muted" style={{ fontSize: 12 }}>Model Identifier</span>
+        </div>
+        <div style={{ margin: "6px 0" }}>LLM Model Name</div>
+        <input
+          className="settings-input"
+          type="text"
+          value={draft.llm_model || ""}
+          onChange={(e) => setField("llm_model", e.target.value)}
+          placeholder="nvidia/nemotron-3-ultra-550b-a55b"
+        />
+      </div>
+
+      <div className="settings-param">
+        <div className="settings-param-header">
+          <code style={{ color: "var(--accent)" }}>llm_api_key</code>
+          <span className="muted" style={{ fontSize: 12 }}>Secret API Key</span>
+        </div>
+        <div style={{ margin: "6px 0" }}>API Key ($NVIDIA_API_KEY / Secret)</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            className="settings-input"
+            type={showKey ? "text" : "password"}
+            value={draft.llm_api_key || ""}
+            onChange={(e) => setField("llm_api_key", e.target.value)}
+            placeholder="nvapi-..."
+            style={{ flex: 1 }}
+          />
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setShowKey(!showKey)}
+          >
+            {showKey ? "Hide" : "Show"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "center" }}>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={runTest}
+          disabled={testing}
+        >
+          {testing ? "Testing..." : "⚡ Test Connection"}
+        </button>
+        {testResult && (
+          <span
+            style={{
+              fontSize: 12,
+              color: testResult.ok ? "var(--accent)" : "var(--danger)",
+              fontFamily: "IBM Plex Mono, monospace",
+            }}
+          >
+            {testResult.ok ? "✓ " : "❌ "}
+            {testResult.msg}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+

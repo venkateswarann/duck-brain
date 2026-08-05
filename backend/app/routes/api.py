@@ -72,7 +72,7 @@ async def put_config(request: Request):
         "ok": True,
         "path": str(path),
         "config": cfg.model_dump(),
-        "note": "Saved. Restart motors.telemetry if you changed mock_hardware or serial_port while it was running.",
+        "note": "Configuration saved successfully.",
     }
 
 
