@@ -1,4 +1,4 @@
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { apiUrl } from "./config";
 import { TelemetryProvider } from "./hooks/useTelemetry";
@@ -36,6 +36,8 @@ const NAV = [
 
 export default function App() {
   const [robot, setRobot] = useState({ id: "…", name: "DCS" });
+  const location = useLocation();
+  const isViz = location.pathname === "/viz";
 
   useEffect(() => {
     fetch(apiUrl("/api/health"))
@@ -77,25 +79,48 @@ export default function App() {
           <div className="muted">Duck Control System</div>
         </header>
         <main className="main">
-          <Routes>
-            <Route path="/" element={<HelpPage />} />
-            <Route path="/help" element={<HelpPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/setup" element={<SetupPage />} />
-            <Route path="/system/nodes" element={<SystemNodesPage />} />
-            <Route path="/logs" element={<LogsPage />} />
-            <Route path="/devices" element={<DevicesPage />} />
-            <Route path="/scripts" element={<ScriptsPage />} />
-            <Route path="/viz" element={<VizPage />} />
-            <Route path="/camera" element={<CameraPage />} />
-            <Route path="/pins" element={<BoardPinsPage />} />
-            <Route path="/control" element={<ControlPage />} />
-            <Route path="/host" element={<HostSystemPage />} />
-            <Route path="/network" element={<ConnectionsPage />} />
-            <Route path="/bluetooth" element={<ConnectionsPage />} />
-            <Route path="/terminal" element={<TerminalPage />} />
-            <Route path="/connections" element={<ConnectionsPage />} />
-          </Routes>
+          {/* Persistent 3D Viz Page Container */}
+          <div
+            style={{
+              display: isViz ? "flex" : "none",
+              flex: 1,
+              height: "100%",
+              width: "100%",
+              flexDirection: "column",
+            }}
+          >
+            <VizPage />
+          </div>
+
+          {/* Regular Routes Container */}
+          <div
+            style={{
+              display: isViz ? "none" : "flex",
+              flex: 1,
+              height: "100%",
+              width: "100%",
+              flexDirection: "column",
+            }}
+          >
+            <Routes>
+              <Route path="/" element={<HelpPage />} />
+              <Route path="/help" element={<HelpPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/setup" element={<SetupPage />} />
+              <Route path="/system/nodes" element={<SystemNodesPage />} />
+              <Route path="/logs" element={<LogsPage />} />
+              <Route path="/devices" element={<DevicesPage />} />
+              <Route path="/scripts" element={<ScriptsPage />} />
+              <Route path="/camera" element={<CameraPage />} />
+              <Route path="/pins" element={<BoardPinsPage />} />
+              <Route path="/control" element={<ControlPage />} />
+              <Route path="/host" element={<HostSystemPage />} />
+              <Route path="/network" element={<ConnectionsPage />} />
+              <Route path="/bluetooth" element={<ConnectionsPage />} />
+              <Route path="/terminal" element={<TerminalPage />} />
+              <Route path="/connections" element={<ConnectionsPage />} />
+            </Routes>
+          </div>
         </main>
       </div>
     </TelemetryProvider>

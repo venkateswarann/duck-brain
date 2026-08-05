@@ -750,14 +750,33 @@ function AiCopilotDrawer({
   const [inputPrompt, setInputPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: "🛑 Generation stopped by user.",
+      },
+    ]);
+  };
+
   const sendPrompt = async (customText?: string) => {
     const text = (customText || inputPrompt).trim();
     if (!text || loading) return;
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     const newHistory: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(newHistory);
@@ -768,6 +787,7 @@ function AiCopilotDrawer({
       const res = await fetch(apiUrl("/api/ai/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           prompt: text,
           current_script: currentContent,
@@ -788,6 +808,7 @@ function AiCopilotDrawer({
         },
       ]);
     } catch (err: any) {
+      if (err.name === "AbortError") return;
       setMessages((prev) => [
         ...prev,
         {
@@ -796,6 +817,7 @@ function AiCopilotDrawer({
         },
       ]);
     } finally {
+      abortControllerRef.current = null;
       setLoading(false);
     }
   };
@@ -834,24 +856,28 @@ function AiCopilotDrawer({
       <div className="ai-chips-row">
         <button
           className="ai-chip"
+          disabled={loading}
           onClick={() => sendPrompt("Explain this script and how it controls the robot.")}
         >
           ⚡ Explain Script
         </button>
         <button
           className="ai-chip"
+          disabled={loading}
           onClick={() => sendPrompt("Check this script for bugs, error handling, or performance issues and fix it.")}
         >
           🐛 Debug & Fix
         </button>
         <button
           className="ai-chip"
+          disabled={loading}
           onClick={() => sendPrompt("Write a script that moves head_yaw and head_pitch in a smooth wave motion pattern.")}
         >
           🦾 Wave Motion
         </button>
         <button
           className="ai-chip"
+          disabled={loading}
           onClick={() => sendPrompt("Write a python script that continuously reads motor voltage, current, and temperature and logs telemetry.")}
         >
           📊 Telemetry Logger
@@ -901,8 +927,25 @@ function AiCopilotDrawer({
         })}
         {loading && (
           <div className="ai-msg assistant">
-            <div className="ai-msg-bubble muted" style={{ fontStyle: "italic" }}>
-              ⏳ Generating response & thinking...
+            <div
+              className="ai-msg-bubble muted"
+              style={{
+                fontStyle: "italic",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+              }}
+            >
+              <span>⏳ Generating response...</span>
+              <button
+                className="btn danger"
+                style={{ padding: "2px 8px", fontSize: 10 }}
+                onClick={stopGeneration}
+                title="Stop AI generation"
+              >
+                🛑 Stop
+              </button>
             </div>
           </div>
         )}
@@ -915,6 +958,7 @@ function AiCopilotDrawer({
           className="ai-chat-textarea"
           placeholder="Ask AI Copilot to write or edit script... (Enter to send)"
           value={inputPrompt}
+          disabled={loading}
           onChange={(e) => setInputPrompt(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -923,15 +967,25 @@ function AiCopilotDrawer({
             }
           }}
         />
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button
-            className="btn primary"
-            disabled={!inputPrompt.trim() || loading}
-            onClick={() => sendPrompt()}
-            style={{ fontSize: 11, padding: "4px 12px" }}
-          >
-            {loading ? "Thinking..." : "Send Prompt ↵"}
-          </button>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+          {loading ? (
+            <button
+              className="btn danger"
+              onClick={stopGeneration}
+              style={{ fontSize: 11, padding: "4px 12px" }}
+            >
+              🛑 Stop Generation
+            </button>
+          ) : (
+            <button
+              className="btn primary"
+              disabled={!inputPrompt.trim()}
+              onClick={() => sendPrompt()}
+              style={{ fontSize: 11, padding: "4px 12px" }}
+            >
+              Send Prompt ↵
+            </button>
+          )}
         </div>
       </div>
     </div>
