@@ -39,13 +39,30 @@ def _baudrate(request: Request) -> int:
 
 @router.post("/servo/scan")
 async def servo_scan(request: Request):
-    """Scan the servo bus for all responding IDs."""
+    """Scan the servo bus for all responding IDs.
+
+    Pauses motors.telemetry while scanning so the serial port is free.
+    """
     svc = _get_service(request)
+    registry = request.app.state.registry
+    motors_was_running = False
+    motors_node = registry.get_optional("motors.telemetry")
+    if motors_node and motors_node.state.value == "running":
+        motors_was_running = True
+        await registry.stop("motors.telemetry")
+        svc._close()  # drop stale connection so we open a fresh one
     try:
         found = svc.scan_bus(_port(request), _baudrate(request))
         return {"ok": True, "servos": found, "count": len(found)}
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
+    finally:
+        svc._close()  # release port before restarting telemetry
+        if motors_was_running:
+            try:
+                await registry.start("motors.telemetry")
+            except Exception:
+                pass  # best effort
 
 
 @router.post("/servo/set-id")
@@ -72,14 +89,31 @@ async def servo_set_id(request: Request):
 
 @router.get("/servo/status")
 async def servo_status(request: Request):
-    """Check if all expected servos respond on the bus."""
+    """Check if all expected servos respond on the bus.
+
+    Pauses motors.telemetry while checking so the serial port is free.
+    """
     svc = _get_service(request)
+    registry = request.app.state.registry
+    motors_was_running = False
+    motors_node = registry.get_optional("motors.telemetry")
+    if motors_node and motors_node.state.value == "running":
+        motors_was_running = True
+        await registry.stop("motors.telemetry")
+        svc._close()  # drop stale connection so we open a fresh one
     try:
         status = svc.get_servo_status(_port(request), _joints(request), _baudrate(request))
         all_online = all(s["online"] for s in status)
         return {"ok": True, "joints": status, "all_online": all_online}
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
+    finally:
+        svc._close()  # release port before restarting telemetry
+        if motors_was_running:
+            try:
+                await registry.start("motors.telemetry")
+            except Exception:
+                pass  # best effort
 
 
 # ── Joint Offset Calibration ─────────────────────────────────────────
