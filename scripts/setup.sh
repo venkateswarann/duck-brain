@@ -116,7 +116,10 @@ source "$VENV/bin/activate"
 pip install -q --upgrade pip
 pip install -q -r "$ROOT/backend/requirements.txt"
 if [[ "$WITH_HARDWARE" -eq 1 ]]; then
-  echo "Installing optional hardware packages (st3215, opencv)…"
+  echo "Installing optional hardware packages (RPi.GPIO, st3215, opencv)…"
+  pip install -q RPi.GPIO || {
+    echo "Warning: RPi.GPIO install failed (not a Raspberry Pi?); continuing."
+  }
   pip install -q st3215 opencv-python-headless || {
     echo "Warning: optional hardware packages failed; continuing with core deps."
   }

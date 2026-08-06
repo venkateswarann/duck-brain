@@ -8,7 +8,7 @@ fastapi-mcp>=0.4.0
 # fastapi-mcp 0.4.x still constructs mcp.Server(name, description) positionally;
 # mcp 2.0 made description keyword-only, so stay on 1.x until fastapi-mcp catches up.
 mcp>=1.12.0,<2
-# Optional hardware (install on robot):
-# st3215
-# opencv-python-headless
-# RPi.GPIO
+# Optional hardware packages (installed automatically by setup.sh --hardware):
+# RPi.GPIO          — Raspberry Pi GPIO control
+# st3215             — ST3215 servo bus
+# opencv-python-headless  — camera support
