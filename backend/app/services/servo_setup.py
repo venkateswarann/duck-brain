@@ -143,12 +143,9 @@ class ServoSetupService:
 
         try:
             # Unlock EEPROM, configure defaults, change ID
-            s.UnlockEprom(current_id)
-            s.WriteMode(current_id, 0)  # Position mode
-            s.WritePGain(current_id, 32)
-            s.WriteIGain(current_id, 0)
-            s.WriteDGain(current_id, 0)
-            s.WriteID(current_id, new_id)
+            s.UnLockEprom(current_id)
+            s.SetMode(current_id, 0)  # Position mode
+            s.ChangeId(current_id, new_id)
             time.sleep(0.5)
             # Verify at new ID
             s.ReadPosition(new_id)
@@ -236,9 +233,8 @@ class ServoSetupService:
         for name, jcfg in joints.items():
             jid = jcfg.id if hasattr(jcfg, "id") else jcfg.get("id", 0)
             try:
-                s.EnableTorque(jid)
-                s.WritePGain(jid, 32)
-                s.WriteGoalPosition(jid, _rad_to_steps(0.0))
+                s.StartServo(jid)
+                s.MoveTo(jid, _rad_to_steps(0.0), speed=1500, acc=50)
             except Exception:
                 pass
         time.sleep(1)
@@ -258,7 +254,7 @@ class ServoSetupService:
             return {"ok": True, "joint": joint_name, "id": jid, "mock": True}
 
         try:
-            self._servo.DisableTorque(jid)
+            self._servo.StopServo(jid)
         except Exception as exc:
             raise RuntimeError(f"Failed to disable torque on {joint_name} (ID {jid}): {exc}") from exc
         return {"ok": True, "joint": joint_name, "id": jid}
@@ -274,8 +270,7 @@ class ServoSetupService:
             return {"ok": True, "joint": joint_name, "id": jid, "mock": True}
 
         try:
-            self._servo.EnableTorque(jid)
-            self._servo.WritePGain(jid, 32)
+            self._servo.StartServo(jid)
         except Exception as exc:
             raise RuntimeError(f"Failed to enable torque on {joint_name} (ID {jid}): {exc}") from exc
         return {"ok": True, "joint": joint_name, "id": jid}
@@ -315,7 +310,8 @@ class ServoSetupService:
 
         try:
             target = 0.0 + offset
-            self._servo.WriteGoalPosition(jid, _rad_to_steps(target))
+            self._servo.StartServo(jid)
+            self._servo.MoveTo(jid, _rad_to_steps(target), speed=1500, acc=50)
             time.sleep(0.5)
             return {"ok": True, "joint": joint_name, "offset": offset}
         except Exception as exc:
@@ -346,7 +342,7 @@ class ServoSetupService:
         for name, jcfg in joints.items():
             jid = jcfg.id if hasattr(jcfg, "id") else jcfg.get("id", 0)
             try:
-                self._servo.DisableTorque(jid)
+                self._servo.StopServo(jid)
             except Exception as exc:
                 errors.append(f"{name}(ID {jid}): {exc}")
 
