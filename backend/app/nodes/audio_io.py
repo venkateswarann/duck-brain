@@ -49,6 +49,7 @@ class AudioIONode(Node):
         self.mic_ok = False
         self.speaker_ok = False
         self._voice: Any = None
+        self._mic_rate = self.cfg.sample_rate
         self._config = {"mic_device": self.cfg.mic_device, "speaker_device": self.cfg.speaker_device}
 
     # ------------------------------------------------------------ lifecycle
@@ -89,9 +90,18 @@ class AudioIONode(Node):
             import sounddevice as sd  # type: ignore  # noqa: PLC0415
             import webrtcvad  # type: ignore  # noqa: F401, PLC0415
 
-            sd.check_input_settings(device=self.cfg.mic_device, samplerate=self.cfg.sample_rate,
-                                    channels=1, dtype="int16")
-            return True
+            # Many USB mics only do 44.1/48 kHz; capture at what works and resample.
+            for rate in (self.cfg.sample_rate, 48000, 44100):
+                try:
+                    sd.check_input_settings(device=self.cfg.mic_device, samplerate=rate,
+                                            channels=1, dtype="int16")
+                    self._mic_rate = rate
+                    if rate != self.cfg.sample_rate:
+                        self.log(f"mic captures at {rate} Hz, resampled to {self.cfg.sample_rate} Hz")
+                    return True
+                except Exception:  # noqa: BLE001
+                    continue
+            raise RuntimeError("mic accepts none of 16000/48000/44100 Hz")
         except Exception as exc:  # noqa: BLE001
             self.log(f"mic unavailable: {exc}")
             return False
@@ -144,6 +154,8 @@ class AudioIONode(Node):
 
         rate = self.cfg.sample_rate
         frame_len = rate * FRAME_MS // 1000
+        dev_rate = self._mic_rate
+        dev_frame_len = dev_rate * FRAME_MS // 1000
         vad = webrtcvad.Vad(max(0, min(3, self.cfg.vad_aggressiveness)))
         preroll: deque[bytes] = deque(maxlen=PREROLL_MS // FRAME_MS)
         silence_frames = max(1, self.cfg.silence_ms // FRAME_MS)
@@ -152,11 +164,11 @@ class AudioIONode(Node):
         in_speech = False
         quiet = 0
         try:
-            with sd.RawInputStream(samplerate=rate, blocksize=frame_len, device=self.cfg.mic_device,
+            with sd.RawInputStream(samplerate=dev_rate, blocksize=dev_frame_len, device=self.cfg.mic_device,
                                    channels=1, dtype="int16") as stream:
                 while not self._stop_evt.is_set():
-                    data, _overflow = stream.read(frame_len)
-                    frame = bytes(data)
+                    data, _overflow = stream.read(dev_frame_len)
+                    frame = _resample(bytes(data), dev_rate, rate, frame_len)
                     if self.speaking or time.monotonic() < self._muted_until:
                         preroll.clear()
                         if in_speech:
@@ -227,6 +239,11 @@ class AudioIONode(Node):
         import sounddevice as sd  # type: ignore  # noqa: PLC0415
 
         pcm, rate = _piper_pcm(self._voice, text)
+        try:
+            sd.check_output_settings(device=self.cfg.speaker_device, samplerate=rate, channels=1, dtype="int16")
+        except Exception:  # noqa: BLE001  (device can't do Piper's rate)
+            n = int(len(pcm) // 2 * 48000 / rate)
+            pcm, rate = _resample(pcm, rate, 48000, n), 48000
         with sd.RawOutputStream(samplerate=rate, device=self.cfg.speaker_device,
                                 channels=1, dtype="int16") as out:
             chunk = rate // 10 * 2  # 100 ms
@@ -248,6 +265,22 @@ class AudioIONode(Node):
         while True:
             await self.bus.update(companion={"audio": self._status()})
             await asyncio.sleep(2.0)
+
+
+def _resample(pcm: bytes, src_rate: int, dst_rate: int, n_out: int) -> bytes:
+    """Linear-interpolation resample of 16-bit mono PCM to exactly n_out samples."""
+    if src_rate == dst_rate:
+        return pcm
+    import numpy as np  # noqa: PLC0415
+
+    x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+    if len(x) == 0:
+        return b"\x00\x00" * n_out
+    if src_rate > dst_rate:  # crude low-pass before decimating: moving average
+        k = max(1, round(src_rate / dst_rate))
+        x = np.convolve(x, np.ones(k) / k, mode="same")
+    pos = np.linspace(0, len(x) - 1, n_out)
+    return np.interp(pos, np.arange(len(x)), x).astype(np.int16).tobytes()
 
 
 def _wav_bytes(pcm: bytes, rate: int) -> bytes:
