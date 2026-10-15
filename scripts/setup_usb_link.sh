@@ -26,12 +26,15 @@ fi
 
 add_config_line() {
   local line="$1"
-  if grep -qxF "$line" "$CONFIG"; then
-    echo "config.txt already has: $line"
+  local marker="# duck usb-link"
+  # Only trust our own marked block: the stock config.txt can carry the same
+  # line under [cm4]/[cm5] filters, where it doesn't apply to this board.
+  if grep -qxF "$marker" "$CONFIG"; then
+    echo "config.txt already has the usb-link block"
   else
     # [all] at the end so the line isn't swallowed by an earlier [pi4]/[cm4] filter.
-    printf '\n[all]\n%s\n' "$line" >>"$CONFIG"
-    echo "config.txt += $line"
+    printf '\n[all]\n%s\n%s\n' "$marker" "$line" >>"$CONFIG"
+    echo "config.txt += $line (in [all])"
   fi
 }
 
