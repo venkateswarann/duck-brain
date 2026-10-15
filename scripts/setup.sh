@@ -130,7 +130,7 @@ if [[ "$WITH_HARDWARE" -eq 1 ]]; then
     echo "Warning: optional hardware packages failed; continuing with core deps."
   }
   echo "Installing companion packages (head servos, mic, speaker)…"
-  pip install -q rustypot webrtcvad-wheels sounddevice piper-tts || {
+  pip install -q "rustypot==0.1.0" webrtcvad-wheels sounddevice piper-tts || {
     echo "Warning: companion packages failed; head/audio nodes will run in mock mode."
   }
 fi

@@ -9,6 +9,7 @@ fastapi-mcp>=0.4.0
 # mcp 2.0 made description keyword-only, so stay on 1.x until fastapi-mcp catches up.
 mcp>=1.12.0,<2
 # Optional hardware packages (installed automatically by setup.sh --hardware):
+# rustypot==0.1.0   — head servos (newer releases dropped rustypot.feetech)
 # RPi.GPIO          — Raspberry Pi GPIO control
 # st3215             — ST3215 servo bus
 # opencv-python-headless  — camera support
