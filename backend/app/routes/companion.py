@@ -132,7 +132,7 @@ async def head_center(request: Request):
 @router.post("/api/head/stop", operation_id="head_stop")
 async def head_stop(request: Request):
     """Stop all head motion immediately and hold the current position."""
-    return _head(request).stop()
+    return _head(request).halt()
 
 
 @router.get("/api/head/state", operation_id="head_state")
@@ -242,7 +242,7 @@ async def estop(request: Request):
     done: dict[str, Any] = {}
     head = registry.get_optional("head.control")
     if isinstance(head, HeadControlNode) and head.state == NodeState.RUNNING:
-        done["head"] = head.stop()
+        done["head"] = head.halt()
     audio = registry.get_optional("audio.io")
     if isinstance(audio, AudioIONode) and audio.state == NodeState.RUNNING:
         await audio.stop_speaking()

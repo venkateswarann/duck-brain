@@ -49,18 +49,28 @@ set -euo pipefail
 DIR="\$HOME/$DEST_NAME"
 cd "\$DIR"
 if [[ "$INSTALL" -eq 1 ]]; then
-  echo "--- apt packages ---"
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq python3-venv python3-pil python3-numpy python3-spidev \
-    python3-rpi.gpio python3-picamera2 fonts-dejavu-core rpicam-apps-lite >/dev/null
+  echo "--- apt packages (only what's missing; the Zero's SD card is small) ---"
+  missing=()
+  for pkg in python3-venv python3-pil python3-numpy python3-spidev python3-rpi.gpio \
+             python3-picamera2 fonts-dejavu-core; do
+    dpkg -s "\$pkg" >/dev/null 2>&1 || missing+=("\$pkg")
+  done
+  # rpicam-apps and rpicam-apps-lite conflict: keep whichever is installed.
+  dpkg -s rpicam-apps >/dev/null 2>&1 || dpkg -s rpicam-apps-lite >/dev/null 2>&1 || missing+=(rpicam-apps-lite)
+  if [[ \${#missing[@]} -gt 0 ]]; then
+    echo "installing: \${missing[*]}"
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq --no-install-recommends "\${missing[@]}" >/dev/null
+  else
+    echo "all present"
+  fi
   if ! grep -qs '^dtparam=spi=on' /boot/firmware/config.txt; then
     echo "Enabling SPI (takes effect after reboot)"
     echo 'dtparam=spi=on' | sudo tee -a /boot/firmware/config.txt >/dev/null
   fi
   echo "--- python venv (system site packages for picamera2/spidev) ---"
   [[ -d .venv ]] || python3 -m venv --system-site-packages .venv
-  .venv/bin/pip install -q --upgrade pip
-  .venv/bin/pip install -q fastapi 'uvicorn>=0.30'
+  .venv/bin/pip install -q --no-cache-dir fastapi 'uvicorn>=0.30'
 fi
 
 echo "--- systemd units ---"

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
+import os
 import threading
 import time
 from collections import deque
@@ -14,6 +16,8 @@ from ..schemas import DuckConfig, MotorTelemetry
 
 HEAD_JOINTS = ("neck_pitch", "head_pitch", "head_yaw", "head_roll")
 DEFAULT_IDS = {"neck_pitch": 30, "head_pitch": 31, "head_yaw": 32, "head_roll": 33}
+# Calibration written by Open_Duck_Mini_Runtime (find_soft_offsets.py) lives here.
+RUNTIME_CONFIG = os.path.expanduser("~/duck_config.json")
 NOD_DEG = 12.0
 SHAKE_DEG = 20.0
 LOW_KP = 2
@@ -52,6 +56,11 @@ class HeadControlNode(Node):
         self._queue: deque[tuple[dict[str, float], float]] = deque()  # (pose, dwell_s)
         self._dwell_until = 0.0
         self._last_cmd_at = time.monotonic()
+        # The return-to-centre timeout only applies once something has moved the
+        # head; at boot it must hold whatever pose it's in.
+        self._commanded = False
+        self.offsets: dict[str, float] = {}
+        self.offsets_source = "none"
         self._tokens = self.cfg.cmd_rate_hz
         self._tokens_at = time.monotonic()
         self.events: deque[dict[str, Any]] = deque(maxlen=50)
@@ -61,6 +70,14 @@ class HeadControlNode(Node):
 
     async def on_start(self) -> None:
         self._mock = bool(self.duck.mock_hardware)
+        self.offsets, self.offsets_source = self._load_offsets()
+        if not self._mock and self.offsets_source == "none":
+            self.log("ERROR no joint calibration found (DCS joints_offsets are all zero and "
+                     f"{RUNTIME_CONFIG} has none): refusing to drive the head servos; running in MOCK mode")
+            self._mock = True
+        elif self.offsets_source != "none":
+            self.log(f"head offsets from {self.offsets_source}: "
+                     + ", ".join(f"{j}={self.offsets[j]:+.3f}" for j in HEAD_JOINTS))
         if not self._mock:
             try:
                 await asyncio.to_thread(self._open_bus)
@@ -69,6 +86,8 @@ class HeadControlNode(Node):
                 self._io = None
                 self._mock = True
         self._config["mock"] = self._mock
+        self._config["offsets_source"] = self.offsets_source
+        self._commanded = False
         self._stop_evt.clear()
         self._thread = threading.Thread(target=self._control_loop, name="head-control", daemon=True)
         self._thread.start()
@@ -90,6 +109,8 @@ class HeadControlNode(Node):
         for joint, rad in zip(self.ids, present):
             deg = math.degrees(rad - self._offset(joint))
             self._cmd[joint] = self._target[joint] = self._present[joint] = deg
+        self.log("holding start pose (calibrated deg): "
+                 + ", ".join(f"{j}={self._cmd[j]:+.1f}" for j in HEAD_JOINTS))
         self._io = io
 
     async def on_stop(self) -> None:
@@ -107,7 +128,26 @@ class HeadControlNode(Node):
         self._io = None
 
     def _offset(self, joint: str) -> float:
-        return float(self.duck.joints_offsets.get(joint, 0.0))
+        return float(self.offsets.get(joint, 0.0))
+
+    def _load_offsets(self) -> tuple[dict[str, float], str]:
+        """Calibrated offsets (radians): DCS config first, else the runtime's ~/duck_config.json.
+
+        All-zero offsets mean "never calibrated"; driving with them sends the head
+        to the servos' raw zero, which is not the duck's home pose.
+        """
+        dcs = {j: float(self.duck.joints_offsets.get(j, 0.0)) for j in HEAD_JOINTS}
+        if any(abs(v) > 1e-6 for v in dcs.values()):
+            return dcs, "DCS config joints_offsets"
+        try:
+            with open(RUNTIME_CONFIG) as f:
+                runtime = json.load(f).get("joints_offsets", {})
+            rt = {j: float(runtime.get(j, 0.0)) for j in HEAD_JOINTS}
+            if any(abs(v) > 1e-6 for v in rt.values()):
+                return rt, RUNTIME_CONFIG
+        except (OSError, ValueError):
+            pass
+        return dcs, "none"
 
     # ------------------------------------------------------------ commands
 
@@ -129,8 +169,10 @@ class HeadControlNode(Node):
     def shake(self, times: int = 1) -> dict[str, Any]:
         return self._gesture("shake", "head_yaw", SHAKE_DEG, times)
 
-    def stop(self) -> dict[str, Any]:
-        """Always accepted: drop queued motion and hold the current position."""
+    def halt(self) -> dict[str, Any]:
+        """Always accepted: drop queued motion and hold the current position.
+
+        (Not named stop(): that's the Node lifecycle method.)"""
         with self._lock:
             self._queue.clear()
             for j in HEAD_JOINTS:
@@ -142,6 +184,7 @@ class HeadControlNode(Node):
         with self._lock:
             return {
                 "mock": self._mock,
+                "offsets_source": self.offsets_source,
                 "running": self._thread is not None and self._thread.is_alive(),
                 "command_deg": {k: round(v, 2) for k, v in self._cmd.items()},
                 "target_deg": {k: round(v, 2) for k, v in self._target.items()},
@@ -162,6 +205,7 @@ class HeadControlNode(Node):
             self._queue.clear()
             self._target.update(applied)
             self._last_cmd_at = time.monotonic()
+            self._commanded = True
         return self._result(name, applied=applied, clamped=clamped)
 
     def _gesture(self, name: str, joint: str, amp: float, times: Any) -> dict[str, Any]:
@@ -184,6 +228,7 @@ class HeadControlNode(Node):
                     clamped.extend(x for x in c if x not in clamped)
             self._queue.append((base, 0.0))
             self._last_cmd_at = time.monotonic()
+            self._commanded = True
         return self._result(name, applied={"times": n, "joint": joint, "amplitude_deg": amp}, clamped=clamped)
 
     def _clamp_pose(self, pose: dict[str, float]) -> tuple[dict[str, float], list[str]]:
@@ -259,7 +304,8 @@ class HeadControlNode(Node):
             self._target.update(pose)
             self._dwell_until = now + dwell
         if (
-            not self._queue
+            self._commanded
+            and not self._queue
             and now - self._last_cmd_at > self.cfg.hold_timeout_s
             and any(abs(v) > 0.5 for v in self._target.values())
         ):
