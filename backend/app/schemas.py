@@ -27,6 +27,46 @@ class JointConfig(BaseModel):
     unit: str = "rad"
 
 
+class HeadJointLimit(BaseModel):
+    min_deg: float
+    max_deg: float
+
+
+def _default_head_limits() -> dict[str, HeadJointLimit]:
+    # Safe ranges from robot_scripts/head_puppet.py, tighter than the URDF limits.
+    return {
+        "head_yaw": HeadJointLimit(min_deg=-60, max_deg=60),
+        "head_pitch": HeadJointLimit(min_deg=-60, max_deg=45),
+        "head_roll": HeadJointLimit(min_deg=-20, max_deg=20),
+        "neck_pitch": HeadJointLimit(min_deg=-20, max_deg=60),
+    }
+
+
+class AudioConfig(BaseModel):
+    mic_device: Optional[int | str] = None  # sounddevice name/index; None = default
+    speaker_device: Optional[int | str] = None
+    sample_rate: int = 16000
+    vad_aggressiveness: int = 2  # webrtcvad 0-3
+    silence_ms: int = 700  # end an utterance after this much silence
+    max_utterance_s: float = 15.0
+    piper_voice: str = ""  # path to a Piper .onnx voice; empty = no TTS
+
+
+class CompanionConfig(BaseModel):
+    """Head, eyes and audio for the desk-companion (Duck Brain) mode."""
+
+    eyes_urls: list[str] = Field(default_factory=lambda: ["http://10.55.0.2:8100"])
+    head_limits: dict[str, HeadJointLimit] = Field(default_factory=_default_head_limits)
+    max_vel_dps: float = 120.0  # head joint speed cap, degrees per second
+    control_hz: float = 50.0
+    head_kp: int = 10
+    cmd_rate_hz: float = 15.0  # head commands accepted per second (excess are rejected)
+    gesture_max_times: int = 3
+    hold_timeout_s: float = 20.0  # an off-centre pose drifts back to centre after this
+    camera_stream: str = "head_cam"
+    audio: AudioConfig = Field(default_factory=AudioConfig)
+
+
 class DuckConfig(BaseModel):
     robot_id: str = "duck-mini-001"
     robot_name: str = "Open Duck Mini"
@@ -57,6 +97,7 @@ class DuckConfig(BaseModel):
     llm_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 8192
+    companion: CompanionConfig = Field(default_factory=CompanionConfig)
 
 
 class NodeInfo(BaseModel):

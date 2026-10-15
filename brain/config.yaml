@@ -1,0 +1,67 @@
+# Duck Brain configuration (laptop side).
+
+robot:
+  # Candidate DCS (Pi 4) addresses; the first that answers /api/health wins and the
+  # list is probed again if it stops answering. LAN/hotspot first, Tailscale second.
+  urls:
+    - http://127.0.0.1:8000          # local testing against a mock DCS
+    - http://duckpi4.local:8000      # Pi 4 on the same hotspot / LAN (set your hostname)
+    - http://duckpi4:8000            # Tailscale MagicDNS name (set your hostname)
+
+llm:
+  ollama_url: http://127.0.0.1:11434
+  model: gemma3:4b                   # open-weight, vision capable
+  num_ctx: 4096
+  num_predict: 160                   # keeps replies to 1-2 sentences
+  temperature: 0.7
+  keep_alive: 30m
+  history_turns: 6
+
+speech_in:
+  # robot: utterances from the duck's USB mic over /ws/audio (normal demo setup)
+  # local: this laptop's microphone (needs the local-mic extra)
+  # text:  only the trace UI text box
+  source: robot
+  stt_model: small.en                # faster-whisper model
+  stt_device: cpu                    # cpu | cuda
+  stt_compute_type: int8
+
+safety:
+  stop_words: ["stop", "duck stop", "freeze", "emergency"]
+  max_gestures_per_turn: 3
+  max_times: 3
+  max_hold_s: 10
+  max_say_chars: 300
+  # Fallback head limits (degrees) if the robot can't be asked; the robot's own
+  # limits from /api/head/state take priority.
+  head_limits:
+    head_yaw: [-60, 60]
+    head_pitch: [-60, 45]
+    head_roll: [-20, 20]
+
+vision:
+  stream: head_cam
+  # Questions that make the brain look through the camera before answering.
+  trigger_words: ["see", "look", "holding", "hold", "this", "what is", "wearing", "show", "colour", "color", "who am i", "in front"]
+
+tracking:
+  enabled: true
+  rate_hz: 6
+  horizontal_fov_deg: 62             # Pi camera v2 ~62, v3 ~66
+  vertical_fov_deg: 48
+  gain: 0.35                         # fraction of the angular error corrected per step
+  deadband: 0.12                     # ignore errors smaller than this (normalised)
+  yaw_sign: -1                       # flip if the head turns away from faces
+  pitch_sign: 1
+  eyes_x_sign: 1                     # flip if the eyes look away from faces
+  greet_on_face: true
+  greet_after_absent_s: 20
+  center_after_lost_s: 8
+
+memory:
+  path: memory.json
+  max_items: 30
+
+ui:
+  host: 127.0.0.1
+  port: 8300

@@ -66,24 +66,26 @@ class VideoCaptureNode(Node):
         else:
             # 1. Try Picamera2 (Raspberry Pi libcamera)
             try:
-                try:
-                    from picamera2 import Picamera2  # type: ignore
-                except ImportError:
-                    import sys
-                    for p in [
-                        "/usr/lib/python3/dist-packages",
-                        "/usr/local/lib/python3/dist-packages",
-                        "/usr/lib/python3.11/dist-packages",
-                        "/usr/lib/python3.10/dist-packages",
-                    ]:
-                        if p not in sys.path:
-                            sys.path.append(p)
-                    from picamera2 import Picamera2  # type: ignore
+                # picamera2 comes from apt (python3-picamera2); setup.sh builds the
+                # venv with --system-site-packages on a Pi so this import just works.
+                # (Appending dist-packages to sys.path mixed apt and venv numpy builds.)
+                from picamera2 import Picamera2  # type: ignore
+                from libcamera import Transform  # type: ignore
 
+                if not Picamera2.global_camera_info():
+                    raise RuntimeError("libcamera found no camera")
                 picam2 = Picamera2()
                 w = int(self._config.get("width", 640))
                 h = int(self._config.get("height", 480))
-                cam_config = picam2.create_preview_configuration(main={"format": "RGB888", "size": (w, h)})
+                # Flips and 180 degrees are done for free in the ISP.
+                rot180 = int(self._config.get("rotation", 0)) == 180
+                transform = Transform(
+                    hflip=bool(self._config.get("flip_h")) != rot180,
+                    vflip=bool(self._config.get("flip_v")) != rot180,
+                )
+                cam_config = picam2.create_preview_configuration(
+                    main={"format": "RGB888", "size": (w, h)}, transform=transform
+                )
                 picam2.configure(cam_config)
                 picam2.start()
                 self._picam2 = picam2
@@ -177,23 +179,24 @@ class VideoCaptureNode(Node):
             fps = max(1, min(60, int(self._config.get("fps", 15))))
             await asyncio.sleep(1 / fps)
 
-    def _transform_frame(self, frame: Any) -> Any:
+    def _transform_frame(self, frame: Any, isp_done: bool = False) -> Any:
+        """Rotate/flip in software; isp_done means Picamera2 already did flips and 180."""
         try:
             import cv2  # type: ignore
         except Exception:
             return frame
 
         rot = int(self._config.get("rotation", 0))
-        if rot == 180:
+        if rot == 180 and not isp_done:
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         elif rot == 90:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
         elif rot == 270:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-        if self._config.get("flip_h"):
+        if self._config.get("flip_h") and not isp_done:
             frame = cv2.flip(frame, 1)
-        if self._config.get("flip_v"):
+        if self._config.get("flip_v") and not isp_done:
             frame = cv2.flip(frame, 0)
         if self._config.get("swap_rb"):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -205,12 +208,11 @@ class VideoCaptureNode(Node):
                 import cv2  # type: ignore
                 frame = self._picam2.capture_array()
                 if frame is not None:
-                    if len(frame.shape) == 3:
-                        if frame.shape[2] == 4:
-                            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-                        elif frame.shape[2] == 3:
-                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    frame = self._transform_frame(frame)
+                    # libcamera's "RGB888" is already B,G,R in memory, which is what
+                    # OpenCV wants; converting it swapped red and blue.
+                    if len(frame.shape) == 3 and frame.shape[2] == 4:
+                        frame = frame[:, :, :3]
+                    frame = self._transform_frame(frame, isp_done=True)
                     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     if ok:
                         return buf.tobytes()

@@ -91,6 +91,8 @@ class NodeRegistry:
             node = self._nodes.get(node_id)
             if node and on:
                 try:
-                    await node.start()
+                    # Through self.start so a serial user (head.control) can
+                    # take the bus from motors.telemetry at boot too.
+                    await self.start(node_id)
                 except Exception as exc:  # noqa: BLE001
                     node.log(f"auto-start failed: {exc}")

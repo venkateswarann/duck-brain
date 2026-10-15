@@ -17,7 +17,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Read-only operations always exposed (FastAPI operation_id = function name)
+# Read-only operations always exposed (by route function name; setup_mcp
+# turns these into operation ids)
 _READ_ONLY_OPS = [
     "health",
     "get_config",
@@ -41,6 +42,28 @@ _READ_ONLY_OPS = [
     "servo_status",
     "calibration_status",
     "get_all_logs",
+]
+
+# Companion (Duck Brain) tools, always exposed: every one is clamped,
+# rate-limited and logged server-side, so they are safe without dev mode.
+_COMPANION_OPS = [
+    "head_look_at",
+    "head_nod",
+    "head_shake",
+    "head_tilt",
+    "head_center",
+    "head_stop",
+    "head_state",
+    "eyes_list_expressions",
+    "eyes_set_expression",
+    "eyes_look",
+    "eyes_blink",
+    "eyes_idle",
+    "eyes_state",
+    "speech_say",
+    "speech_stop",
+    "estop",
+    "companion_status",
 ]
 
 # Additional operations exposed in mcp_dev_mode
@@ -90,9 +113,37 @@ def setup_mcp(app: "FastAPI") -> None:
 
     duck = getattr(app.state, "duck", None)
     is_dev = bool(getattr(duck, "mcp_dev_mode", False))
-    allowed = list(_READ_ONLY_OPS)
+    allowed = list(_READ_ONLY_OPS) + list(_COMPANION_OPS)
     if is_dev:
         allowed.extend(_DEV_MODE_OPS)
+
+    # The lists above use function names, but FastAPI's generated operation ids
+    # look like "health_api_health_get", so without this none of them matched.
+    # Must run before the OpenAPI schema is first built (and cached).
+    from fastapi.routing import APIRoute
+
+    def walk(routes):
+        # Newer FastAPI nests included routers instead of flattening them.
+        for item in routes:
+            if isinstance(item, APIRoute):
+                yield item
+            elif getattr(item, "original_router", None) is not None:  # FastAPI >= 0.13x
+                yield from walk(item.original_router.routes)
+            elif getattr(item, "router", None) is not None:
+                yield from walk(item.router.routes)
+            elif getattr(item, "routes", None):
+                yield from walk(item.routes)
+
+    wanted = set(allowed)
+    by_name: dict[str, APIRoute] = {}
+    for route in walk(app.routes):
+        if route.operation_id is None and route.name in wanted:
+            # Same function name in two routers (e.g. get_config): the shorter,
+            # top-level path is the one the list means.
+            if route.name not in by_name or len(route.path) < len(by_name[route.name].path):
+                by_name[route.name] = route
+    for name, route in by_name.items():
+        route.operation_id = name
 
     try:
         mcp = FastApiMCP(
@@ -100,7 +151,8 @@ def setup_mcp(app: "FastAPI") -> None:
             name="DCS Robot Control",
             description=(
                 "Duck Control System — robot management API for AI agents. "
-                + ("DEV MODE: write operations enabled." if is_dev else "Read-only mode.")
+                + "Companion tools (head, eyes, speech, estop) are always on and clamped server-side. "
+                + ("DEV MODE: write operations enabled." if is_dev else "Admin operations are read-only.")
             ),
             include_operations=allowed,
         )

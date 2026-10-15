@@ -8,3 +8,5 @@ configs/duck_config.json
 .DS_Store
 *.egg-info/
 .pytest_cache/
+brain/memory.json
+devices/head_zero/boot_status.png

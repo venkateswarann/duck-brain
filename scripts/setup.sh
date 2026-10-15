@@ -109,7 +109,13 @@ fi
 echo
 echo "--- Python backend ---"
 if [[ ! -d "$VENV" ]]; then
-  python3 -m venv "$VENV"
+  # On a Raspberry Pi, picamera2/libcamera only come from apt (python3-picamera2),
+  # so the venv must see system packages instead of path-hacking them in later.
+  if grep -qs "Raspberry Pi" /proc/device-tree/model; then
+    python3 -m venv --system-site-packages "$VENV"
+  else
+    python3 -m venv "$VENV"
+  fi
 fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
@@ -122,6 +128,10 @@ if [[ "$WITH_HARDWARE" -eq 1 ]]; then
   }
   pip install -q st3215 opencv-python-headless || {
     echo "Warning: optional hardware packages failed; continuing with core deps."
+  }
+  echo "Installing companion packages (head servos, mic, speaker)…"
+  pip install -q rustypot webrtcvad-wheels sounddevice piper-tts || {
+    echo "Warning: companion packages failed; head/audio nodes will run in mock mode."
   }
 fi
 

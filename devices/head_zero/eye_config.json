@@ -1,0 +1,12 @@
+{
+  "left": {
+    "rotation": -91,
+    "offset_x": 0,
+    "offset_y": 0
+  },
+  "right": {
+    "rotation": 110,
+    "offset_x": 0,
+    "offset_y": 0
+  }
+}

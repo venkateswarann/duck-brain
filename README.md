@@ -1,6 +1,6 @@
 # DCS — Duck Control System
 
-Web-based modular control stack for [Open Duck Mini](https://github.com/apirrone/Open_Duck_Mini), implemented at `/home/venki/repos/embedded/DCS`.
+Web-based modular control stack for [Open Duck Mini](https://github.com/apirrone/Open_Duck_Mini).
 
 Joint IDs and runtime concepts are taken from:
 
@@ -8,6 +8,47 @@ Joint IDs and runtime concepts are taken from:
 - `/home/venki/repos/embedded/duck mini /Open_Duck_Mini_Runtime` (`rustypot_position_hwi.py` motor map)
 
 Servo API target: [python-st3215](https://github.com/Mickael-Roger/python-st3215) (optional; mock mode is default).
+
+## Duck Brain: offline AI desk companion
+
+The `feature/duck-brain` work turns the duck into an expressive desk companion. It's head and eyes only, on a stand, with no walking. **Gemma 3 4B** decides what it says and does, running locally through Ollama.
+
+```text
+ Laptop ── hotspot/LAN or Tailscale ──► Pi 4 (DCS :8000, /mcp)          ── USB-C ↔ USB (10.55.0.0/24) ──► Pi Zero 2 W (head)
+ brain/: Gemma 3 4B, faster-whisper,    head.control → Feetech IDs 30-33                                eyes_server :8100 → 2× GC9A01
+         safety layer, face tracking,   audio.io     → USB mic (VAD) + Piper                            head_camera → head_cam stream
+         memory, trace UI :8300         eyes.link    → proxy to the Zero                                boot_status on the eyes at boot
+```
+
+| Part | Where |
+|---|---|
+| Brain harness (Gemma, safety, MCP client, STT, tracking, trace UI) | [`brain/`](brain/README.md) |
+| Eyes, head camera, boot-status screens (Pi Zero) | [`devices/head_zero/`](devices/head_zero/README.md) |
+| Companion API and MCP tools (head, eyes, speech, e-stop) | `backend/app/routes/companion.py`, `backend/app/nodes/{head_control,eyes_link,audio_io}.py` |
+| Duck page (eyes preview, head sliders, STOP, camera, safety events) | `frontend/src/pages/CompanionPage.tsx` → http://…:5173/duck |
+| Agent Skill ([agentskills.io](https://agentskills.io/) format) | [`skills/open-duck-control/`](skills/open-duck-control/SKILL.md) |
+| Pi 4 ↔ Zero USB network, Zero deploy | `scripts/setup_usb_link.sh`, `scripts/deploy_head_zero.sh` |
+
+**Model:** Gemma 3 4B (`gemma3:4b`, Google DeepMind) under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). The code in this repository is MIT licensed (see `LICENSE`).
+
+**Built before the hack day vs. for it:**
+- **Before:** the DCS core (node runtime, UI pages, servo setup and calibration, video FrameHub, read-only MCP) and the GC9A01 driver and eye art (`emo1.py`).
+- **For it:**
+  - the eyes service and boot-status screens
+  - head control with server-side clamping
+  - the companion REST and MCP tools
+  - the audio node
+  - the Duck page
+  - the brain harness (Gemma decisions, safety layer, reflexes, memory, trace UI)
+  - the Agent Skill
+  - the USB-link networking
+  - Picamera2 streaming fixes
+
+**Bring-up order:**
+1. `sudo scripts/setup_usb_link.sh pi4|zero` on each Pi, then reboot both.
+2. `./scripts/setup_robot.sh` on the Pi 4, and copy `configs/duck_config.example.json` (it has the `companion` section).
+3. `./scripts/deploy_head_zero.sh --host bdxmini.local`.
+4. On the laptop: `cd brain && uv sync --extra stt && uv run duck-brain`.
 
 ## Architecture (nodes)
 

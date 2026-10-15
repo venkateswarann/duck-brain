@@ -154,6 +154,20 @@ PARAMETER_HELP: list[dict[str, Any]] = [
         ),
     },
     {
+        "key": "companion",
+        "group": "Companion",
+        "type": "object",
+        "default": "see duck_config.example.json",
+        "summary": "Desk-companion mode: head servos, eyes on the head Pi Zero, mic and speaker.",
+        "details": (
+            "eyes_urls: candidate addresses of the eyes service (USB link first, then LAN/Tailscale). "
+            "head_limits: per-joint safe range in degrees; every head command is clamped to it. "
+            "max_vel_dps / cmd_rate_hz / gesture_max_times / hold_timeout_s: speed cap, command rate "
+            "limit, gesture repetition cap and return-to-centre timeout. audio.piper_voice: Piper "
+            ".onnx voice used for speech; empty means speech is only logged."
+        ),
+    },
+    {
         "key": "llm_provider",
         "group": "LLM Agent",
         "type": "enum",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,13 +17,17 @@ from .config_loader import (
     load_json,
     load_script_manifest,
 )
+from .nodes.audio_io import AudioIONode
+from .nodes.eyes_link import EyesLinkNode
 from .nodes.gpio_node import GpioPinsNode
+from .nodes.head_control import HeadControlNode
 from .nodes.motors_telemetry import MotorsTelemetryNode
 from .nodes.script_node import discover_script_nodes
 from .nodes.system_metrics import SystemMetricsNode
 from .nodes.video_capture import VideoCaptureNode
 from .routes import ai as ai_routes
 from .routes import api as api_routes
+from .routes import companion as companion_routes
 from .routes import gpio as gpio_routes
 from .routes import nodes as nodes_routes
 from .routes import setup as setup_routes
@@ -37,7 +42,11 @@ from .runtime.registry import NodeRegistry
 
 class AppState:
     def __init__(self) -> None:
-        self.config_path = DEFAULT_CONFIG if DEFAULT_CONFIG.exists() else EXAMPLE_CONFIG
+        env_config = os.environ.get("DCS_CONFIG")
+        if env_config:
+            self.config_path = Path(env_config)
+        else:
+            self.config_path = DEFAULT_CONFIG if DEFAULT_CONFIG.exists() else EXAMPLE_CONFIG
         self.duck = load_duck_config(self.config_path)
         self.bus = TelemetryBus()
         self.locks = ResourceLocks()
@@ -62,6 +71,10 @@ async def lifespan(app: FastAPI):
     )
     state.registry.register(VideoCaptureNode(state.bus, state.locks, config=state.duck))
     state.registry.register(SystemMetricsNode(state.bus, state.locks))
+    # Companion (Duck Brain): head servos, eyes on the head Pi Zero, mic + speaker
+    state.registry.register(HeadControlNode(state.bus, state.locks, state.duck))
+    state.registry.register(EyesLinkNode(state.bus, state.locks, state.duck))
+    state.registry.register(AudioIONode(state.bus, state.locks, state.duck))
     state.registry.register(
         GpioPinsNode(
             state.bus, state.locks,
@@ -100,6 +113,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(ai_routes.router)
     app.include_router(api_routes.router)
+    app.include_router(companion_routes.router)
     app.include_router(gpio_routes.router)
     app.include_router(nodes_routes.router)
     app.include_router(setup_routes.router)

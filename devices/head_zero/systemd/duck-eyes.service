@@ -1,0 +1,20 @@
+[Unit]
+Description=Duck eyes (GC9A01 x2) HTTP API on :8100
+Conflicts=duck-boot-status.service
+After=duck-boot-status.service
+Wants=duck-headcam.service
+# Crashing for good brings the status screen back with the error on it.
+OnFailure=duck-boot-status.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=spi gpio
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python eyes_server.py --port 8100
+Restart=on-failure
+RestartSec=2
+
+# Not enabled on its own: duck-boot-status starts it once the robot is ready.

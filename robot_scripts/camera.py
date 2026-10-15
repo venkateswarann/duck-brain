@@ -46,7 +46,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--backend",
         choices=("auto", "opencv", "picamera"),
         default="auto",
-        help="Capture backend (default: auto, OpenCV first then Picamera2)",
+        help="Capture backend (default: auto, Picamera2 if libcamera sees a CSI camera, else OpenCV)",
     )
     return parser.parse_args(argv)
 
@@ -71,6 +71,15 @@ def open_opencv(args: argparse.Namespace):
     return capture
 
 
+def csi_camera_present() -> bool:
+    try:
+        from picamera2 import Picamera2  # noqa: PLC0415
+
+        return bool(Picamera2.global_camera_info())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def open_picamera(args: argparse.Namespace):
     from picamera2 import Picamera2  # noqa: PLC0415
 
@@ -93,15 +102,17 @@ def main(argv: list[str]) -> int:
 
     capture = None
     picamera = None
-    if args.backend in ("auto", "opencv"):
-        capture = open_opencv(args)
-        if capture is None:
-            print(f"OpenCV could not open camera '{args.device}'", file=sys.stderr, flush=True)
-    if capture is None and args.backend in ("auto", "picamera"):
+    # On a Pi with a CSI camera, /dev/video0 is the unicam/codec node: OpenCV
+    # "opens" it but never gets a frame, so Picamera2 has to be tried first.
+    if args.backend == "picamera" or (args.backend == "auto" and csi_camera_present()):
         try:
             picamera = open_picamera(args)
         except Exception as exc:  # noqa: BLE001
             print(f"Picamera2 unavailable: {exc}", file=sys.stderr, flush=True)
+    if picamera is None and args.backend in ("auto", "opencv"):
+        capture = open_opencv(args)
+        if capture is None:
+            print(f"OpenCV could not open camera '{args.device}'", file=sys.stderr, flush=True)
     if capture is None and picamera is None:
         print("No camera could be opened — check the device and permissions", file=sys.stderr, flush=True)
         return 1
@@ -119,20 +130,27 @@ def main(argv: list[str]) -> int:
     )
 
     frames = 0
+    failed_reads = 0
     started = time.time()
     try:
         while running:
             if capture is not None:
                 ok, frame = capture.read()
                 if not ok or frame is None:
+                    failed_reads += 1
                     print("frame grab failed", file=sys.stderr, flush=True)
+                    if failed_reads >= 25:
+                        print("no frames from OpenCV after 25 tries; try --backend picamera",
+                              file=sys.stderr, flush=True)
+                        return 1
                     time.sleep(0.2)
                     continue
+                failed_reads = 0
                 if frame.shape[1] != args.width or frame.shape[0] != args.height:
                     frame = cv2.resize(frame, (args.width, args.height))
             else:
+                # "RGB888" from libcamera is already BGR in memory: no conversion.
                 frame = picamera.capture_array()
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
             if stream.publish_frame(frame):
                 frames += 1

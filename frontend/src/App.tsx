@@ -16,8 +16,10 @@ import HelpPage from "./pages/HelpPage";
 import SettingsPage from "./pages/SettingsPage";
 import SetupPage from "./pages/SetupPage";
 import LogsPage from "./pages/LogsPage";
+import CompanionPage from "./pages/CompanionPage";
 
 const NAV = [
+  { to: "/duck", label: "Duck", icon: "🦆" },
   { to: "/help", label: "Help", icon: "?" },
   { to: "/settings", label: "Settings", icon: "⚙" },
   { to: "/setup", label: "Setup", icon: "🔧" },
@@ -105,6 +107,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<HelpPage />} />
               <Route path="/help" element={<HelpPage />} />
+              <Route path="/duck" element={<CompanionPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/setup" element={<SetupPage />} />
               <Route path="/system/nodes" element={<SystemNodesPage />} />

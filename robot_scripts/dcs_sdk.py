@@ -31,7 +31,7 @@ import time
 import urllib.parse
 from typing import Any, Optional
 
-__all__ = ["VideoStream", "api_url", "node_id", "default_stream_id", "log"]
+__all__ = ["VideoStream", "api_url", "find_backend", "node_id", "default_stream_id", "log"]
 
 DEFAULT_API_URL = "http://127.0.0.1:8000"
 WARN_INTERVAL = 10.0
@@ -39,6 +39,29 @@ WARN_INTERVAL = 10.0
 
 def api_url() -> str:
     return os.environ.get("DCS_API_URL") or DEFAULT_API_URL
+
+
+def find_backend(candidates: list[str], timeout: float = 1.5) -> Optional[str]:
+    """Return the first base URL whose /api/health answers, or None.
+
+    Lets one config list LAN, USB-link and Tailscale addresses for the same
+    backend; whichever network is up at the time wins.
+    """
+    for base in candidates:
+        parsed = urllib.parse.urlsplit(base)
+        factory = (
+            http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+        )
+        try:
+            conn = factory(parsed.hostname or "127.0.0.1", parsed.port, timeout=timeout)
+            conn.request("GET", parsed.path.rstrip("/") + "/api/health")
+            ok = conn.getresponse().status == 200
+            conn.close()
+        except (OSError, http.client.HTTPException):
+            ok = False
+        if ok:
+            return base.rstrip("/")
+    return None
 
 
 def node_id() -> str:

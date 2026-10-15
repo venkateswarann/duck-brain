@@ -1,0 +1,15 @@
+[Unit]
+Description=Duck head camera -> DCS head_cam stream
+# After the eyes so boot_status' camera probe never collides with streaming.
+After=duck-eyes.service network.target
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=video
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python head_camera.py --dcs http://10.55.0.1:8000 @DCS_FALLBACK@
+Restart=always
+RestartSec=3
+
+# Not enabled on its own: duck-boot-status starts it once the robot is ready.

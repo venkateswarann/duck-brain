@@ -1,0 +1,15 @@
+[Unit]
+Description=Duck boot status screens on the eye displays
+After=local-fs.target
+# Hand-over: starting duck-eyes stops this unit first, so the SPI bus is free.
+Conflicts=duck-eyes.service
+Before=duck-eyes.service
+
+[Service]
+Type=simple
+# root: needs systemctl to start duck-eyes, and SPI/GPIO before groups are set up
+ExecStart=/usr/bin/python3 @DIR@/boot_status.py --dcs http://10.55.0.1:8000 --usb-ip 10.55.0.2
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

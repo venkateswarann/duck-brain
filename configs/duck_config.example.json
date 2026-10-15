@@ -135,8 +135,11 @@
   },
   "nodes": {
     "motors.telemetry": true,
-    "video.capture": true,
-    "system.metrics": true
+    "video.capture": false,
+    "system.metrics": true,
+    "head.control": true,
+    "eyes.link": true,
+    "audio.io": true
   },
   "control": {
     "keymap": {
@@ -168,5 +171,45 @@
     }
   },
   "allow_script_runner": true,
-  "allow_web_terminal": false
+  "allow_web_terminal": false,
+  "companion": {
+    "eyes_urls": [
+      "http://10.55.0.2:8100",
+      "http://bdxmini.local:8100"
+    ],
+    "head_limits": {
+      "head_yaw": {
+        "min_deg": -60,
+        "max_deg": 60
+      },
+      "head_pitch": {
+        "min_deg": -60,
+        "max_deg": 45
+      },
+      "head_roll": {
+        "min_deg": -20,
+        "max_deg": 20
+      },
+      "neck_pitch": {
+        "min_deg": -20,
+        "max_deg": 60
+      }
+    },
+    "max_vel_dps": 120,
+    "control_hz": 50,
+    "head_kp": 10,
+    "cmd_rate_hz": 15,
+    "gesture_max_times": 3,
+    "hold_timeout_s": 20,
+    "camera_stream": "head_cam",
+    "audio": {
+      "mic_device": null,
+      "speaker_device": null,
+      "sample_rate": 16000,
+      "vad_aggressiveness": 2,
+      "silence_ms": 700,
+      "max_utterance_s": 15,
+      "piper_voice": "/home/bdxv2/piper/en_GB-alan-medium.onnx"
+    }
+  }
 }
