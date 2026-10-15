@@ -46,6 +46,10 @@ case "$ROLE" in
       sed -i "s/rootwait/rootwait modules-load=dwc2,g_ether g_ether.host_addr=$HOST_MAC g_ether.dev_addr=$DEV_MAC/" "$CMDLINE"
       echo "cmdline.txt += modules-load=dwc2,g_ether (backup: cmdline.txt.bak)"
     fi
+    # Raspberry Pi OS marks USB gadget interfaces unmanaged; NetworkManager must own usb0.
+    echo 'SUBSYSTEM=="net", KERNEL=="usb0", ENV{NM_UNMANAGED}="0"' >/etc/udev/rules.d/99-duck-usb-link.rules
+    udevadm control --reload
+    nmcli device set usb0 managed yes >/dev/null 2>&1 || true
     nmcli connection delete "$CON" >/dev/null 2>&1 || true
     # Route via the Pi 4 only as a last resort (metric 700), so Wi-Fi wins when present.
     nmcli connection add type ethernet con-name "$CON" ifname usb0 \
