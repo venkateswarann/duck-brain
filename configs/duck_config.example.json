@@ -210,8 +210,8 @@
       "sway_deg": 2.0
     },
     "audio": {
-      "mic_device": null,
-      "speaker_device": null,
+      "mic_device": "USB PnP",
+      "speaker_device": "googlevoicehat",
       "sample_rate": 16000,
       "vad_aggressiveness": 2,
       "silence_ms": 700,

@@ -47,6 +47,8 @@ The `feature/duck-brain` work turns the duck into an expressive desk companion. 
 **Bring-up order:**
 1. `sudo scripts/setup_usb_link.sh pi4|zero` on each Pi, then reboot both.
 2. `./scripts/setup_robot.sh` on the Pi 4, and copy `configs/duck_config.example.json` (it has the `companion` section).
+   Speaker: the MAX98357A I2S amp (Open Duck Mini wiring: BCLK GPIO18, LRC GPIO19, DIN GPIO21) needs
+   `dtoverlay=googlevoicehat-soundcard` in the Pi 4's `/boot/firmware/config.txt`, then a reboot. It only accepts 48 kHz; DCS resamples Piper's output.
 3. `./scripts/deploy_head_zero.sh --host bdxmini.local`.
 4. On the laptop: `cd brain && uv sync --extra stt && uv run duck-brain`.
 
