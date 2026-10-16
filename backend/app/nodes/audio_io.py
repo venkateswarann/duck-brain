@@ -238,7 +238,14 @@ class AudioIONode(Node):
             return
         import sounddevice as sd  # type: ignore  # noqa: PLC0415
 
-        pcm, rate = _piper_pcm(self._voice, text)
+        pitch, speed = self.cfg.voice_pitch, self.cfg.voice_speed
+        pcm, rate = _piper_pcm(self._voice, text, length_scale=pitch / speed)
+        if abs(pitch - 1.0) > 1e-3:
+            # Play the samples back faster: higher pitch, and the slower synthesis
+            # above cancels out the speed-up.
+            out_rate = 48000
+            n = int(len(pcm) // 2 * out_rate / (rate * pitch))
+            pcm, rate = _resample(pcm, int(rate * pitch), out_rate, n), out_rate
         try:
             sd.check_output_settings(device=self.cfg.speaker_device, samplerate=rate, channels=1, dtype="int16")
         except Exception:  # noqa: BLE001  (device can't do Piper's rate)
@@ -251,6 +258,14 @@ class AudioIONode(Node):
                 if self._speak_cancel.is_set():
                     break
                 out.write(pcm[i:i + chunk])
+
+    def set_voice(self, pitch: Optional[float], speed: Optional[float]) -> dict[str, Any]:
+        if pitch is not None:
+            self.cfg.voice_pitch = max(0.5, min(2.0, float(pitch)))
+        if speed is not None:
+            self.cfg.voice_speed = max(0.5, min(2.0, float(speed)))
+        return {"ok": True, "pitch": self.cfg.voice_pitch, "speed": self.cfg.voice_speed,
+                "voice": self.cfg.piper_voice}
 
     # ------------------------------------------------------------ status
 
@@ -293,11 +308,13 @@ def _wav_bytes(pcm: bytes, rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _piper_pcm(voice: Any, text: str) -> tuple[bytes, int]:
+def _piper_pcm(voice: Any, text: str, length_scale: float = 1.0) -> tuple[bytes, int]:
     """16-bit mono PCM from Piper; handles both the 1.3+ and older piper-tts APIs."""
     if hasattr(voice, "synthesize_stream_raw"):  # piper-tts < 1.3
-        pcm = b"".join(voice.synthesize_stream_raw(text))
+        pcm = b"".join(voice.synthesize_stream_raw(text, length_scale=length_scale))
         return pcm, int(voice.config.sample_rate)
-    chunks = list(voice.synthesize(text))
+    from piper import SynthesisConfig  # type: ignore  # noqa: PLC0415
+
+    chunks = list(voice.synthesize(text, syn_config=SynthesisConfig(length_scale=length_scale)))
     rate = chunks[0].sample_rate if chunks else 22050
     return b"".join(c.audio_int16_bytes for c in chunks), int(rate)

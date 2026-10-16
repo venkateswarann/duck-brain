@@ -50,6 +50,10 @@ class AudioConfig(BaseModel):
     silence_ms: int = 700  # end an utterance after this much silence
     max_utterance_s: float = 15.0
     piper_voice: str = ""  # path to a Piper .onnx voice; empty = no TTS
+    # Cute voice: pitch > 1 raises the voice (Piper speaks slower, playback runs
+    # faster, so the speed stays natural); speed > 1 talks faster.
+    voice_pitch: float = Field(default=1.0, ge=0.5, le=2.0)
+    voice_speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
 
 class IdleMotionConfig(BaseModel):

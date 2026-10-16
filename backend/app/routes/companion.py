@@ -83,6 +83,11 @@ class SayReq(BaseModel):
     text: str = Field(max_length=400, description="Sentence for the duck to say out loud.")
 
 
+class VoiceReq(BaseModel):
+    pitch: Optional[float] = Field(default=None, description="0.5..2; above 1 is higher and cuter.")
+    speed: Optional[float] = Field(default=None, description="0.5..2; above 1 talks faster.")
+
+
 class HeartbeatReq(BaseModel):
     name: str = "brain"
     detail: str = ""
@@ -292,6 +297,12 @@ async def speech_stop(request: Request):
     """Stop talking and drop anything queued."""
     await _audio(request).stop_speaking()
     return {"ok": True}
+
+
+@router.post("/api/speech/voice")
+async def speech_voice(req: VoiceReq, request: Request):
+    """Tune the voice live (not saved; set companion.audio.voice_pitch/voice_speed to keep it)."""
+    return _audio(request).set_voice(req.pitch, req.speed)
 
 
 @router.websocket("/ws/audio")

@@ -216,7 +216,9 @@
       "vad_aggressiveness": 2,
       "silence_ms": 700,
       "max_utterance_s": 15,
-      "piper_voice": "/home/bdxv2/piper/en_GB-alan-medium.onnx"
+      "piper_voice": "/home/bdxv2/piper/en_US-hfc_female-medium.onnx",
+      "voice_pitch": 1.35,
+      "voice_speed": 1.05
     }
   }
 }
