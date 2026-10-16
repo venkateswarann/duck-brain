@@ -1,7 +1,7 @@
 {
   "ears": {
     "left":  {"gpio": 12, "pwm_channel": 0, "sign": 1,  "trim": 0.0},
-    "right": {"gpio": 13, "pwm_channel": 1, "sign": -1, "trim": 0.0, "enabled": false},
+    "right": {"gpio": 13, "pwm_channel": 1, "sign": -1, "trim": 0.0},
     "pwm_chip": 0,
     "center_us": 1500,
     "range_us": 500,
