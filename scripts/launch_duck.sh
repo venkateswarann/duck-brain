@@ -11,6 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Pi 4 candidates, first that answers wins: LAN mDNS, Tailscale name.
 ROBOTS=("http://rpi1.local:8000" "http://rpi1:8000")
 WITH_BRAIN=0
+BRAIN_ARGS=()
 BRAIN_SOURCE="robot"
 UI_PORT=5173
 OPEN_BROWSER=1
@@ -23,6 +24,7 @@ Options:
   --robot URL        DCS backend on the Pi 4 (repeatable; default: ${ROBOTS[*]})
   --brain            also run the Duck Brain (needs Ollama with gemma3:4b)
   --brain-source S   robot | local | text (default: $BRAIN_SOURCE)
+  --no-tracking      brain starts with face tracking off (toggle it in the trace UI)
   --port N           UI port (default: $UI_PORT)
   --no-open          don't open a browser
 EOF
@@ -34,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --robot) CUSTOM_ROBOTS+=("$2"); shift 2 ;;
     --brain) WITH_BRAIN=1; shift ;;
     --brain-source) BRAIN_SOURCE="$2"; shift 2 ;;
+    --no-tracking) BRAIN_ARGS+=(--no-tracking); shift ;;
     --port) UI_PORT="$2"; shift 2 ;;
     --no-open) OPEN_BROWSER=0; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -92,7 +95,7 @@ if [[ "$WITH_BRAIN" -eq 1 ]]; then
   fi
   (
     cd "$ROOT/brain"
-    uv run -q duck-brain --source "$BRAIN_SOURCE" --robot-url "$ROBOT" 2>&1 | sed -u 's/^/[brain] /'
+    uv run -q --extra stt duck-brain --source "$BRAIN_SOURCE" --robot-url "$ROBOT" "${BRAIN_ARGS[@]}" 2>&1 | sed -u 's/^/[brain] /'
   ) &
   PIDS+=($!)
 fi

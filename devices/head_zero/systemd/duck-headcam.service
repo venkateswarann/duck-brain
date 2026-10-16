@@ -8,7 +8,7 @@ Type=simple
 User=@USER@
 SupplementaryGroups=video
 WorkingDirectory=@DIR@
-ExecStart=@DIR@/.venv/bin/python head_camera.py --dcs http://10.55.0.1:8000 @DCS_FALLBACK@
+ExecStart=@DIR@/.venv/bin/python head_camera.py --hflip --vflip --dcs http://10.55.0.1:8000 @DCS_FALLBACK@
 Restart=always
 RestartSec=3
 
