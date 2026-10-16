@@ -89,15 +89,16 @@ class SysfsServo:
         self.dir = self.base / f"pwm{channel}"
         if not self.base.exists():
             raise OSError(f"{self.base} missing (add dtoverlay=pwm-2chan to config.txt)")
-        if not self.dir.exists():
-            (self.base / "export").write_text(str(channel))
-        # udev fixes the permissions just after export; wait for it.
-        for _ in range(50):
+        # Right after boot udev may still be handing the chip and the new channel
+        # to the gpio group; wait up to ~5 s rather than falling back to software PWM.
+        for _ in range(100):
             try:
+                if not self.dir.exists():
+                    (self.base / "export").write_text(str(channel))
                 (self.dir / "period").write_text(str(self.PERIOD_NS))
                 break
             except OSError:
-                time.sleep(0.02)
+                time.sleep(0.05)
         else:
             raise OSError(f"cannot write {self.dir}/period")
         self._enabled = False

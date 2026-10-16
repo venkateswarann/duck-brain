@@ -13,6 +13,11 @@ Type=simple
 User=@USER@
 SupplementaryGroups=spi gpio
 WorkingDirectory=@DIR@
+# As root ("+"): let udev finish (PWM permissions), and put the ear pins back on
+# hardware PWM in case a software-PWM fallback left them as plain outputs.
+ExecStartPre=+-/usr/bin/udevadm settle --timeout=5
+ExecStartPre=+-/usr/bin/pinctrl set 12 a0
+ExecStartPre=+-/usr/bin/pinctrl set 13 a0
 ExecStart=@DIR@/.venv/bin/python eyes_server.py --port 8100
 Restart=on-failure
 RestartSec=2
