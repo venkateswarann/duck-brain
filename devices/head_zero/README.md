@@ -33,7 +33,7 @@ DC on GPIO 9 reuses SPI0's MISO pin. That works because nothing is ever read bac
 |---|---|---|---|
 | Left ear servo (signal) | GPIO 12 | 32 | hardware PWM0 (`dtoverlay=pwm-2chan,...`) |
 | Right ear servo (signal) | GPIO 13 | 33 | hardware PWM1 |
-| Head lamp | GPIO 1 | 28 | on/off, lgpio software PWM for dimming |
+| Head lamp | GPIO 26 | 37 (GND on 39) | on/off, lgpio software PWM for dimming |
 
 - **Ears:**
   - Positions run -1..1: 1.5 ms ± 0.5 ms, the same as Open Duck Mini's `antennas.py`. Commands are clamped to `limit` (0.9).
@@ -41,7 +41,9 @@ DC on GPIO 9 reuses SPI0's MISO pin. That works because nothing is ever read bac
   - Until the first command the servos get no pulses, so starting the service never moves them. `POST /ears/release` stops the pulses again.
   - Without the overlay, the ears fall back to lgpio software pulses (slight jitter).
   - Once the ears are in use they follow the expression (`"ears": [left, right]` in `expressions.json`).
-- **Lamp:** `gpio=1=op,dl` keeps it off from power-up. `force_eeprom_read=0` stops the firmware's HAT-EEPROM probe on GPIO 0/1 from flickering it. The deploy script adds both lines to config.txt.
+- **Lamp:** `gpio=26=op,dl` in config.txt (added by the deploy script) keeps it off from power-up.
+  - A GPIO pin gives only about 8–16 mA at 3.3 V. A small LED with a 150–330 Ω resistor can go straight on the pin; anything brighter needs a transistor or MOSFET.
+  - Avoid GPIO 0/1 (pins 27/28): they are reserved for the HAT ID EEPROM and the firmware toggles them at boot.
 - **API (port 8100):**
   - `GET/POST /ears` (`{left, right}`)
   - `POST /ears/gesture` (`{name: wiggle|perk|droop|flick_left|flick_right|alert, times}`)

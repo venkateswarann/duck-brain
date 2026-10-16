@@ -69,15 +69,18 @@ if [[ "$INSTALL" -eq 1 ]]; then
     echo "Enabling SPI (takes effect after reboot)"
     echo 'dtparam=spi=on' | sudo tee -a /boot/firmware/config.txt >/dev/null
   fi
-  # Ears on hardware PWM (GPIO 12/13), lamp on GPIO 1 held low (off) from boot.
-  # force_eeprom_read=0 stops the firmware probing for a HAT EEPROM on GPIO 0/1,
-  # which would flicker the lamp. Takes effect after a reboot; until then the
-  # ears use lgpio software pulses.
+  # Ears on hardware PWM (GPIO 12/13), lamp on GPIO 26 held low (off) from boot.
+  # Takes effect after a reboot; until then the ears use lgpio software pulses.
   if ! grep -qs '# duck ears+lamp' /boot/firmware/config.txt; then
     echo "Adding the ear PWM overlay and lamp pin default to config.txt (reboot to apply)"
     printf '%s\n' '' '[all]' '# duck ears+lamp' \
-      'dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4' 'gpio=1=op,dl' 'force_eeprom_read=0' \
+      'dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4' 'gpio=26=op,dl' \
       | sudo tee -a /boot/firmware/config.txt >/dev/null
+  fi
+  # The lamp moved from GPIO 1 to GPIO 26: update an older block in place.
+  if grep -qs '^gpio=1=op,dl' /boot/firmware/config.txt; then
+    echo "Moving the lamp's boot default from GPIO 1 to GPIO 26 (reboot to apply)"
+    sudo sed -i -e 's/^gpio=1=op,dl$/gpio=26=op,dl/' -e '/^force_eeprom_read=0$/d' /boot/firmware/config.txt
   fi
   echo "--- python venv (system site packages for picamera2/spidev) ---"
   [[ -d .venv ]] || python3 -m venv --system-site-packages .venv

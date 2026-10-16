@@ -3,7 +3,7 @@
 Wiring (body_config.json, BCM numbering):
     left ear servo   GPIO 12 (pin 32)  hardware PWM0
     right ear servo  GPIO 13 (pin 33)  hardware PWM1
-    head lamp        GPIO 1  (pin 28)  on/off, software-PWM dimming
+    head lamp        GPIO 26 (pin 37)  on/off, software-PWM dimming
 
 Ears use the kernel PWM (dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4),
 so the pulses don't jitter while the eyes keep the CPU busy. Without the
@@ -40,7 +40,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "follow_expressions": True,
         "release_after_s": 0,
     },
-    "lamp": {"gpio": 1, "active_high": True, "pwm_hz": 200},
+    "lamp": {"gpio": 26, "active_high": True, "pwm_hz": 200},
 }
 
 # Gestures as keyframes: (left, right, seconds to hold). None = keep current.

@@ -23,7 +23,7 @@ The `feature/duck-brain` work turns the duck into an expressive desk companion. 
 | Part | Where |
 |---|---|
 | Brain harness (Gemma, safety, MCP client, STT, tracking, trace UI) | [`brain/`](brain/README.md) |
-| Eyes, ear servos (GPIO 12/13), head lamp (GPIO 1), head camera, boot-status screens (Pi Zero) | [`devices/head_zero/`](devices/head_zero/README.md) |
+| Eyes, ear servos (GPIO 12/13), head lamp (GPIO 26), head camera, boot-status screens (Pi Zero) | [`devices/head_zero/`](devices/head_zero/README.md) |
 | Companion API and MCP tools (head, eyes, ears, lamp, speech, e-stop) | `backend/app/routes/companion.py`, `backend/app/nodes/{head_control,eyes_link,audio_io}.py` |
 | Duck page (eyes preview, head sliders, STOP, camera, safety events) | `frontend/src/pages/CompanionPage.tsx` → http://…:5173/duck |
 | Agent Skill ([agentskills.io](https://agentskills.io/) format) | [`skills/open-duck-control/`](skills/open-duck-control/SKILL.md) |

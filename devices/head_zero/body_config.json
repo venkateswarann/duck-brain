@@ -10,5 +10,5 @@
     "follow_expressions": true,
     "release_after_s": 0
   },
-  "lamp": {"gpio": 1, "active_high": true, "pwm_hz": 200}
+  "lamp": {"gpio": 26, "active_high": true, "pwm_hz": 200}
 }
