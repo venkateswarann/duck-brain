@@ -167,15 +167,21 @@ class LgpioLamp:
         self.active_high = active_high
         self.pwm_hz = pwm_hz
         lgpio.gpio_claim_output(handle, gpio, 0 if active_high else 1)
+        self._pwm = False
 
     def set(self, brightness: float) -> None:
         if 0.0 < brightness < 1.0:
             duty = brightness if self.active_high else 1.0 - brightness
             self.lg.tx_pwm(self.h, self.gpio, self.pwm_hz, duty * 100.0)
+            self._pwm = True
             return
-        self.lg.tx_pwm(self.h, self.gpio, 0, 0)  # stop any PWM first
-        on = brightness >= 1.0
-        self.lg.gpio_write(self.h, self.gpio, 1 if on == self.active_high else 0)
+        level = 1 if (brightness >= 1.0) == self.active_high else 0
+        if self._pwm:
+            # Re-claiming the pin is what reliably ends lgpio's software PWM.
+            self.lg.gpio_free(self.h, self.gpio)
+            self.lg.gpio_claim_output(self.h, self.gpio, level)
+            self._pwm = False
+        self.lg.gpio_write(self.h, self.gpio, level)
 
     def close(self) -> None:
         self.set(0.0)

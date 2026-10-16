@@ -89,8 +89,12 @@ def create_app(mock: bool, fps: float) -> FastAPI:
         engine.start()
         body.start()
         yield
-        body.stop()
-        engine.stop()
+        try:
+            body.stop()
+        except Exception as exc:  # noqa: BLE001  (never skip releasing the displays)
+            print(f"ears/lamp shutdown: {exc}")
+        finally:
+            engine.stop()
 
     app = FastAPI(title="Duck Eyes", lifespan=lifespan)
 
