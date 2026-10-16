@@ -53,6 +53,8 @@ The `feature/duck-brain` work turns the duck into an expressive desk companion. 
 3. `./scripts/deploy_head_zero.sh --host bdxmini.local`.
 4. On the laptop: `cd brain && uv sync --extra stt && uv run duck-brain`.
 
+**Day to day (laptop):** `./scripts/launch_duck.sh [--brain]` starts the UI (and the brain). `./scripts/restart_duck.sh [--reboot] [--brain]` restarts everything on the laptop, the Pi 4 and the Zero, waits until it's healthy, and reports power problems.
+
 ## Architecture (nodes)
 
 Every capability is a **Node** (`motors.telemetry`, `video.capture`, `script.v2_rl_walk_mujoco`, …).
