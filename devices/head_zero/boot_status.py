@@ -31,7 +31,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -43,7 +43,18 @@ AMBER = (240, 180, 50)
 GREY = (120, 120, 130)
 TEXT = (230, 235, 240)
 BG = (0, 0, 0)
-SAFE = 170  # text stays inside the central 170 px square, clear of the round edge
+# The duck's shell hides ~2 mm (~15 px) around each round panel. Everything is laid
+# out inside the visible circle: radius VISIBLE_R, text in the square inscribed in it.
+BEZEL_PX = 15
+VISIBLE_R = WIDTH // 2 - BEZEL_PX
+SAFE = int(2 * (VISIBLE_R - 4) / math.sqrt(2))
+
+
+def set_bezel(px: int) -> None:
+    global BEZEL_PX, VISIBLE_R, SAFE
+    BEZEL_PX = px
+    VISIBLE_R = WIDTH // 2 - px
+    SAFE = int(2 * (VISIBLE_R - 4) / math.sqrt(2))
 FAIL_COUNT_FILE = "/run/duck-boot-status.failures"
 
 
@@ -163,9 +174,9 @@ def _font(size: int):
     return ImageFont.load_default(size=size)
 
 
-TITLE_FONT = _font(18)
-ROW_FONT = _font(14)
-SMALL_FONT = _font(11)
+TITLE_FONT = _font(15)
+ROW_FONT = _font(12)
+SMALL_FONT = _font(10)
 
 
 def _mark(draw: ImageDraw.ImageDraw, x: int, y: int, ok: Optional[bool]) -> None:
@@ -185,27 +196,28 @@ def draw_panel(title: str, checks: list[Check], spinner: float, footer: str = ""
 
     done = sum(1 for c in checks if c.ok)
     frac = done / max(1, len(checks))
-    ring = (6, 6, WIDTH - 6, HEIGHT - 6)
+    inset = BEZEL_PX + 2
+    ring = (inset, inset, WIDTH - inset, HEIGHT - inset)
     draw.arc(ring, 0, 360, fill=(35, 35, 42), width=6)
     colour = GREEN if all(c.ok or not c.required for c in checks) else AMBER
     draw.arc(ring, -90, -90 + 360 * frac, fill=colour, width=6)
     if frac < 1:  # spinning dot shows the screen is alive
         a = spinner * 2 * math.pi
-        r = WIDTH // 2 - 9
+        r = VISIBLE_R - 5
         x, y = cx + r * math.cos(a), cy + r * math.sin(a)
         draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=TEXT)
 
     left = cx - SAFE // 2
     top = cy - SAFE // 2
-    draw.text((cx, top + 6), title, font=TITLE_FONT, fill=TEXT, anchor="mt")
-    y = top + 34
+    draw.text((cx, top + 4), title, font=TITLE_FONT, fill=TEXT, anchor="mt")
+    y = top + 26
     for c in checks:
         _mark(draw, left + 2, y, c.ok)
-        draw.text((left + 18, y), c.label, font=ROW_FONT, fill=TEXT if c.required else GREY)
+        draw.text((left + 16, y), c.label, font=ROW_FONT, fill=TEXT if c.required else GREY)
         draw.text((left + SAFE, y + 1), c.detail[:12], font=SMALL_FONT, fill=GREY, anchor="ra")
-        y += 21
+        y += 18
     if footer:
-        draw.text((cx, top + SAFE - 4), footer[:26], font=SMALL_FONT, fill=RED, anchor="mb")
+        draw.text((cx, top + SAFE), footer[:22], font=SMALL_FONT, fill=RED, anchor="mb")
     return img
 
 
@@ -239,9 +251,15 @@ def main() -> int:
     parser.add_argument("--max-wait", type=float, default=180.0,
                         help="start the eyes anyway after this many seconds")
     parser.add_argument("--no-handover", action="store_true", help="just show status, never start duck-eyes")
+    parser.add_argument("--bezel-px", type=int, default=15,
+                        help="pixels hidden by the shell around each panel (2 mm is about 15)")
+    parser.add_argument("--no-mirror", action="store_true",
+                        help="don't pre-mirror the status text (the panels show it mirrored)")
+    parser.add_argument("--show-bezel", action="store_true", help="outline the visible area (for fitting)")
     parser.add_argument("--mock", action="store_true", help="fake checks, no displays")
     parser.add_argument("--once", action="store_true", help="render one frame to boot_status.png and exit")
     args = parser.parse_args()
+    set_bezel(args.bezel_px)
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
@@ -270,7 +288,16 @@ def main() -> int:
             spinner = (frame % 24) / 24
             left = draw_panel("duck head", zero, spinner, footer)
             right = draw_panel("duck body", pi4, spinner)
-            display.show(left, right)
+            if args.show_bezel:
+                for img in (left, right):
+                    ImageDraw.Draw(img).ellipse(
+                        (BEZEL_PX, BEZEL_PX, WIDTH - BEZEL_PX, HEIGHT - BEZEL_PX), outline=RED)
+            if args.no_mirror:
+                display.show(left, right)
+            else:
+                # The panels' scan order mirrors the picture; invisible on the
+                # eyes, but text reads backwards, so pre-mirror it here only.
+                display.show(ImageOps.mirror(left), ImageOps.mirror(right))
             frame += 1
 
             if args.once:
