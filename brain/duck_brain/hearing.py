@@ -37,11 +37,29 @@ class Transcriber:
             self.trace.emit("stt", status="error",
                             detail="faster-whisper not installed (uv sync --extra stt); voice input disabled, text box still works")
             return
-        self._model = await asyncio.to_thread(
-            WhisperModel, self.model_name, device=self.device, compute_type=self.compute_type
-        )
+        device, compute = self.device, self.compute_type
+        if device in ("auto", "cuda"):
+            if _cuda_ready():
+                device = "cuda"
+            elif device == "cuda":
+                self.trace.emit("stt", status="error", detail="CUDA libraries not found (uv sync --extra stt-gpu); using CPU")
+                device = "cpu"
+            else:
+                device = "cpu"
+        try:
+            self._model = await asyncio.to_thread(WhisperModel, self.model_name, device=device, compute_type=compute)
+            if device == "cuda":  # libraries load lazily: prove the GPU really works now
+                silence = np.zeros(16000, dtype=np.float32)
+                await asyncio.to_thread(lambda: list(self._model.transcribe(silence, language="en")[0]))
+        except Exception as exc:  # noqa: BLE001
+            if device != "cuda":
+                raise
+            self.trace.emit("stt", status="error", detail=f"GPU speech-to-text failed ({exc}); using CPU")
+            device = "cpu"
+            self._model = await asyncio.to_thread(WhisperModel, self.model_name, device="cpu", compute_type="int8")
+        self.device = device
         self.available = True
-        self.trace.emit("stt", status="ok", detail=f"faster-whisper {self.model_name} on {self.device}")
+        self.trace.emit("stt", status="ok", detail=f"faster-whisper {self.model_name} on {device}")
 
     async def transcribe(self, wav_bytes: bytes) -> str:
         if not self.available:
@@ -54,6 +72,29 @@ class Transcriber:
         audio = pcm.astype(np.float32) / 32768.0
         segments, _info = self._model.transcribe(audio, language="en", beam_size=1, vad_filter=False)
         return " ".join(s.text.strip() for s in segments).strip()
+
+
+def _cuda_ready() -> bool:
+    """Make the pip-installed CUDA libraries (stt-gpu extra) loadable, then ask CTranslate2 for a GPU."""
+    import ctypes  # noqa: PLC0415
+    import glob  # noqa: PLC0415
+    import os  # noqa: PLC0415
+
+    try:
+        import nvidia  # type: ignore  # noqa: PLC0415
+
+        for base in nvidia.__path__:
+            for lib in ("cublas/lib/libcublasLt.so.12", "cublas/lib/libcublas.so.12", "cudnn/lib/libcudnn*.so.9"):
+                for path in sorted(glob.glob(os.path.join(base, lib))):
+                    ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
+    except (ImportError, OSError):
+        pass
+    try:
+        import ctranslate2  # noqa: PLC0415
+
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:  # noqa: BLE001
+        return False
 
 
 # Whisper's favourite hallucinations on silence/noise.

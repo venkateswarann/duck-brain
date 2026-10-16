@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import queue
 import threading
 import time
 import wave
@@ -239,25 +240,45 @@ class AudioIONode(Node):
         import sounddevice as sd  # type: ignore  # noqa: PLC0415
 
         pitch, speed = self.cfg.voice_pitch, self.cfg.voice_speed
-        pcm, rate = _piper_pcm(self._voice, text, length_scale=pitch / speed)
-        if abs(pitch - 1.0) > 1e-3:
-            # Play the samples back faster: higher pitch, and the slower synthesis
-            # above cancels out the speed-up.
-            out_rate = 48000
-            n = int(len(pcm) // 2 * out_rate / (rate * pitch))
-            pcm, rate = _resample(pcm, int(rate * pitch), out_rate, n), out_rate
-        try:
-            sd.check_output_settings(device=self.cfg.speaker_device, samplerate=rate, channels=1, dtype="int16")
-        except Exception:  # noqa: BLE001  (device can't do Piper's rate)
-            n = int(len(pcm) // 2 * 48000 / rate)
-            pcm, rate = _resample(pcm, rate, 48000, n), 48000
-        with sd.RawOutputStream(samplerate=rate, device=self.cfg.speaker_device,
+        # Piper yields one chunk per sentence; synthesise the next sentence while
+        # the current one plays, so speech starts after the first sentence instead
+        # of after the whole reply (the Pi 4 synthesises at about real time).
+        chunks: queue.Queue = queue.Queue(maxsize=4)
+
+        def produce() -> None:
+            try:
+                for pcm, rate in _piper_chunks(self._voice, text, length_scale=pitch / speed):
+                    if self._speak_cancel.is_set():
+                        break
+                    chunks.put((pcm, rate))
+            finally:
+                chunks.put(None)
+
+        threading.Thread(target=produce, name="piper", daemon=True).start()
+        out_rate = 48000  # the I2S amp only does 48 kHz; resampling here also applies the pitch
+        done = False
+        with sd.RawOutputStream(samplerate=out_rate, device=self.cfg.speaker_device,
                                 channels=1, dtype="int16") as out:
-            chunk = rate // 10 * 2  # 100 ms
-            for i in range(0, len(pcm), chunk):
+            while True:
+                item = chunks.get()
+                if item is None:
+                    done = True
+                    break
+                pcm, rate = item
+                # Playing the samples back faster raises the pitch; the slower
+                # synthesis above cancels out the speed-up.
+                n = int(len(pcm) // 2 * out_rate / (rate * pitch))
+                pcm = _resample(pcm, int(rate * pitch), out_rate, n)
+                step = out_rate // 10 * 2  # 100 ms
+                for i in range(0, len(pcm), step):
+                    if self._speak_cancel.is_set():
+                        break
+                    out.write(pcm[i:i + step])
                 if self._speak_cancel.is_set():
                     break
-                out.write(pcm[i:i + chunk])
+        # Stopped early: drain so the producer thread can see the cancel and exit.
+        while not done:
+            done = chunks.get() is None
 
     def set_voice(self, pitch: Optional[float], speed: Optional[float]) -> dict[str, Any]:
         if pitch is not None:
@@ -308,13 +329,13 @@ def _wav_bytes(pcm: bytes, rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _piper_pcm(voice: Any, text: str, length_scale: float = 1.0) -> tuple[bytes, int]:
-    """16-bit mono PCM from Piper; handles both the 1.3+ and older piper-tts APIs."""
+def _piper_chunks(voice: Any, text: str, length_scale: float = 1.0):
+    """Yields (16-bit mono PCM, rate) per sentence; handles the 1.3+ and older piper-tts APIs."""
     if hasattr(voice, "synthesize_stream_raw"):  # piper-tts < 1.3
-        pcm = b"".join(voice.synthesize_stream_raw(text, length_scale=length_scale))
-        return pcm, int(voice.config.sample_rate)
+        for pcm in voice.synthesize_stream_raw(text, length_scale=length_scale):
+            yield pcm, int(voice.config.sample_rate)
+        return
     from piper import SynthesisConfig  # type: ignore  # noqa: PLC0415
 
-    chunks = list(voice.synthesize(text, syn_config=SynthesisConfig(length_scale=length_scale)))
-    rate = chunks[0].sample_rate if chunks else 22050
-    return b"".join(c.audio_int16_bytes for c in chunks), int(rate)
+    for chunk in voice.synthesize(text, syn_config=SynthesisConfig(length_scale=length_scale)):
+        yield chunk.audio_int16_bytes, int(chunk.sample_rate)

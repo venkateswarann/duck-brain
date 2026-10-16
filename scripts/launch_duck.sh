@@ -25,6 +25,7 @@ Options:
   --brain            also run the Duck Brain (needs Ollama with gemma3:4b)
   --brain-source S   robot | local | text (default: $BRAIN_SOURCE)
   --no-tracking      brain starts with face tracking off (toggle it in the trace UI)
+  --fast             chat with gemma3:1b (quicker); camera questions still use gemma3:4b
   --port N           UI port (default: $UI_PORT)
   --no-open          don't open a browser
 EOF
@@ -37,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --brain) WITH_BRAIN=1; shift ;;
     --brain-source) BRAIN_SOURCE="$2"; shift 2 ;;
     --no-tracking) BRAIN_ARGS+=(--no-tracking); shift ;;
+    --fast) BRAIN_ARGS+=(--model gemma3:1b); shift ;;
     --port) UI_PORT="$2"; shift 2 ;;
     --no-open) OPEN_BROWSER=0; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -95,7 +97,10 @@ if [[ "$WITH_BRAIN" -eq 1 ]]; then
   fi
   (
     cd "$ROOT/brain"
-    uv run -q --extra stt duck-brain --source "$BRAIN_SOURCE" --robot-url "$ROBOT" "${BRAIN_ARGS[@]}" 2>&1 | sed -u 's/^/[brain] /'
+    # GPU speech-to-text when an NVIDIA GPU is present (about 70x faster than CPU).
+    STT_EXTRA=stt
+    command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 && STT_EXTRA=stt-gpu
+    uv run -q --extra "$STT_EXTRA" duck-brain --source "$BRAIN_SOURCE" --robot-url "$ROBOT" "${BRAIN_ARGS[@]}" 2>&1 | sed -u 's/^/[brain] /'
   ) &
   PIDS+=($!)
 fi

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import time
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
@@ -81,10 +82,16 @@ def action_schema(expressions: list[str]) -> dict[str, Any]:
     }
 
 
+# The "say" field complete in a partial JSON stream (escaped quotes allowed).
+_SAY_RE = re.compile(r'"say"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
 class GemmaClient:
     def __init__(self, cfg: dict[str, Any]) -> None:
         self.url = cfg.get("ollama_url", "http://127.0.0.1:11434").rstrip("/")
         self.model = cfg.get("model", "gemma3:4b")
+        # Used instead when an image is attached (gemma3:1b can't see).
+        self.vision_model = cfg.get("vision_model") or self.model
         self.options = {
             "num_ctx": int(cfg.get("num_ctx", 4096)),
             "num_predict": int(cfg.get("num_predict", 160)),
@@ -93,14 +100,17 @@ class GemmaClient:
         self.keep_alive = cfg.get("keep_alive", "30m")
         self.history_turns = int(cfg.get("history_turns", 6))
         self.history: list[dict[str, str]] = []
+        self.spoke_early = False
+        self.first_say_s: Optional[float] = None
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=3.0))
 
     async def check(self) -> str:
         r = await self._client.get(f"{self.url}/api/tags")
         r.raise_for_status()
         names = [m["name"] for m in r.json().get("models", [])]
-        if self.model not in names and f"{self.model}:latest" not in names:
-            raise RuntimeError(f"model {self.model} not pulled in Ollama (have {names}); run: ollama pull {self.model}")
+        for model in {self.model, self.vision_model}:
+            if model not in names and f"{model}:latest" not in names:
+                raise RuntimeError(f"model {model} not pulled in Ollama (have {names}); run: ollama pull {model}")
         return self.model
 
     async def warm_up(self) -> None:
@@ -114,8 +124,14 @@ class GemmaClient:
         expressions: list[str],
         memory_summary: str,
         image_b64: Optional[str] = None,
+        on_say: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> tuple[dict[str, Any], str, float]:
-        """Returns (parsed action dict, raw text, seconds taken)."""
+        """Returns (parsed action dict, raw text, seconds taken).
+
+        The reply is streamed; on_say is called as soon as the "say" field is
+        complete, so the duck can start talking while Gemma is still choosing
+        the expression and gestures.
+        """
         system = f"{PERSONA}\nEye expressions you can show: {', '.join(expressions)}.\n{memory_summary}"
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         messages.extend(self.history[-2 * self.history_turns:])
@@ -126,16 +142,34 @@ class GemmaClient:
         messages.append(user)
 
         started = time.monotonic()
-        r = await self._client.post(f"{self.url}/api/chat", json={
-            "model": self.model,
+        raw = ""
+        said = False
+        async with self._client.stream("POST", f"{self.url}/api/chat", json={
+            "model": self.vision_model if image_b64 else self.model,
             "messages": messages,
             "format": action_schema(expressions),
-            "stream": False,
+            "stream": True,
             "options": self.options,
             "keep_alive": self.keep_alive,
-        })
-        r.raise_for_status()
-        raw = r.json()["message"]["content"]
+        }) as r:
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if not line.strip():
+                    continue
+                part = json.loads(line)
+                raw += part.get("message", {}).get("content", "")
+                if on_say is not None and not said:
+                    m = _SAY_RE.search(raw)
+                    if m:
+                        said = True
+                        try:
+                            await on_say(json.loads(f'"{m.group(1)}"'))
+                        except Exception:  # noqa: BLE001  (speaking early is best effort)
+                            said = False
+                if part.get("done"):
+                    break
+        self.first_say_s = time.monotonic() - started if said else None
+        self.spoke_early = said
         took = time.monotonic() - started
         try:
             parsed = json.loads(raw)

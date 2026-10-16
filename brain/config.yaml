@@ -11,6 +11,7 @@ robot:
 llm:
   ollama_url: http://127.0.0.1:11434
   model: gemma3:4b                   # open-weight, vision capable
+  vision_model: gemma3:4b            # used for camera questions (launch --fast sets model: gemma3:1b, text only)
   num_ctx: 4096
   num_predict: 160                   # keeps replies to 1-2 sentences
   temperature: 0.7
@@ -23,7 +24,7 @@ speech_in:
   # text:  only the trace UI text box
   source: robot
   stt_model: small.en                # faster-whisper model
-  stt_device: cpu                    # cpu | cuda
+  stt_device: auto                   # auto (NVIDIA GPU if usable, else CPU) | cuda | cpu
   stt_compute_type: int8
 
 safety:

@@ -44,7 +44,7 @@ class Brain:
         self.memory = Memory(str(base_dir / mem_cfg.get("path", "memory.json")), int(mem_cfg.get("max_items", 30)))
         self.llm = GemmaClient(cfg.get("llm", {}))
         sp = cfg.get("speech_in", {})
-        self.stt = Transcriber(sp.get("stt_model", "small.en"), sp.get("stt_device", "cpu"),
+        self.stt = Transcriber(sp.get("stt_model", "small.en"), sp.get("stt_device", "auto"),
                                sp.get("stt_compute_type", "int8"), self.trace)
         self.vision_cfg = cfg.get("vision", {})
         self.stream = self.vision_cfg.get("stream", "head_cam")
@@ -183,13 +183,25 @@ class Brain:
             self.trace.emit("vision", status="ok" if image else "error",
                             detail="looked through the head camera" if image else "no camera frame available",
                             image_b64=image)
+        early_say: list[str] = []
+
+        async def say_early(said: str) -> None:
+            said = self.safety.review({"say": said}).say  # same length cap as the full review
+            if not said:
+                return
+            await self.robot.post("/api/speech/say", {"text": said})
+            early_say.append(said)
+            self.trace.emit("say", text=said)
+
         try:
-            raw, raw_text, took = await self.llm.decide(text, self.safety.expressions, self.memory.summary(), image)
+            raw, raw_text, took = await self.llm.decide(text, self.safety.expressions, self.memory.summary(), image,
+                                                        on_say=say_early)
         except Exception as exc:  # noqa: BLE001
             self.trace.emit("llm", status="error", detail=f"Gemma failed: {exc}")
             await self._reflex_expression("neutral")
             return
-        self.trace.emit("gemma", raw=raw_text, seconds=round(took, 2), vision=bool(image))
+        self.trace.emit("gemma", raw=raw_text, seconds=round(took, 2), vision=bool(image),
+                        first_words_s=round(self.llm.first_say_s, 2) if self.llm.first_say_s else None)
 
         plan = self.safety.review(raw)
         for d in plan.all_decisions():
@@ -198,7 +210,7 @@ class Brain:
 
         # Expression + speech first (one MCP session), then gestures in order.
         first: list[tuple[str, dict[str, Any]]] = [("eyes_set_expression", {"name": plan.expression.args["name"]})]
-        if plan.say:
+        if plan.say and not early_say:
             first.append(("speech_say", {"text": plan.say}))
             self.trace.emit("say", text=plan.say)
         self.trace.set_state(expression=plan.expression.args["name"])
@@ -331,8 +343,18 @@ async def amain(args: argparse.Namespace) -> None:
     if args.model:
         cfg.setdefault("llm", {})["model"] = args.model
 
-    brain = Brain(cfg, cfg_path.parent)
     ui_cfg = cfg.get("ui", {})
+    host, port = ui_cfg.get("host", "127.0.0.1"), int(ui_cfg.get("port", 8300))
+    # Two brains would both hear every utterance and both answer (and double the load).
+    # The OS drops this lock when the process exits, even after a crash.
+    import fcntl  # noqa: PLC0415
+
+    lock = open(cfg_path.parent / ".duck-brain.lock", "w")  # noqa: SIM115  (held for the process lifetime)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit("Another duck-brain is already running. Stop it first: pkill -f 'bin/duck-brain'") from None
+    brain = Brain(cfg, cfg_path.parent)
     server = uvicorn.Server(uvicorn.Config(create_ui(brain), host=ui_cfg.get("host", "127.0.0.1"),
                                            port=int(ui_cfg.get("port", 8300)), log_level="warning"))
     ui_task = asyncio.create_task(server.serve(), name="ui")
