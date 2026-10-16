@@ -46,14 +46,15 @@ vision:
 
 tracking:
   enabled: true
-  rate_hz: 6
-  horizontal_fov_deg: 62             # Pi camera v2 ~62, v3 ~66
-  vertical_fov_deg: 48
-  gain: 0.35                         # fraction of the angular error corrected per step
-  deadband: 0.12                     # ignore errors smaller than this (normalised)
+  rate_hz: 3
+  horizontal_fov_deg: 54             # OV5647 (Pi camera v1) ~54, v2 ~62, v3 ~66
+  vertical_fov_deg: 41
+  gain: 0.25                         # fraction of the angular error corrected per step
+  deadband: 0.18                     # ignore errors smaller than this (normalised)
   yaw_sign: -1                       # flip if the head turns away from faces
   pitch_sign: 1
   eyes_x_sign: 1                     # flip if the eyes look away from faces
+  min_step_deg: 1.5                 # skip head moves smaller than this (fewer servo current spikes)
   greet_on_face: true
   greet_after_absent_s: 20
   center_after_lost_s: 8

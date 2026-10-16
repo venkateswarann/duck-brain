@@ -195,10 +195,10 @@
         "max_deg": 60
       }
     },
-    "max_vel_dps": 120,
+    "max_vel_dps": 60,
     "control_hz": 50,
-    "head_kp": 10,
-    "cmd_rate_hz": 15,
+    "head_kp": 8,
+    "cmd_rate_hz": 10,
     "gesture_max_times": 3,
     "hold_timeout_s": 20,
     "camera_stream": "head_cam",

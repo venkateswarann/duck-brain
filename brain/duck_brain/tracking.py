@@ -107,6 +107,8 @@ class FaceTracker:
                 if abs(cx) > deadband or abs(cy) > deadband:
                     dyaw = float(self.cfg.get("yaw_sign", -1)) * cx * (hfov / 2) * gain if abs(cx) > deadband else 0.0
                     dpitch = float(self.cfg.get("pitch_sign", 1)) * cy * (vfov / 2) * gain if abs(cy) > deadband else 0.0
+                    if max(abs(dyaw), abs(dpitch)) < float(self.cfg.get("min_step_deg", 1.5)):
+                        continue  # not worth a servo move (each one draws current)
                     self.yaw = max(-60.0, min(60.0, self.yaw + dyaw))
                     self.pitch = max(-40.0, min(30.0, self.pitch + dpitch))
                     await self.robot.post("/api/head/look_at", {"yaw": round(self.yaw, 1), "pitch": round(self.pitch, 1)})

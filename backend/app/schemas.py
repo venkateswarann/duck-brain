@@ -57,10 +57,10 @@ class CompanionConfig(BaseModel):
 
     eyes_urls: list[str] = Field(default_factory=lambda: ["http://10.55.0.2:8100"])
     head_limits: dict[str, HeadJointLimit] = Field(default_factory=_default_head_limits)
-    max_vel_dps: float = 120.0  # head joint speed cap, degrees per second
+    max_vel_dps: float = 60.0  # head joint speed cap, degrees per second
     control_hz: float = 50.0
-    head_kp: int = 10
-    cmd_rate_hz: float = 15.0  # head commands accepted per second (excess are rejected)
+    head_kp: int = 8
+    cmd_rate_hz: float = 10.0  # head commands accepted per second (excess are rejected)
     gesture_max_times: int = 3
     hold_timeout_s: float = 20.0  # an off-centre pose drifts back to centre after this
     camera_stream: str = "head_cam"
