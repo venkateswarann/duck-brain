@@ -37,7 +37,7 @@ DC on GPIO 9 reuses SPI0's MISO pin. That works because nothing is ever read bac
 
 - **Ears:**
   - Positions run -1..1: 1.5 ms ± 0.5 ms, the same as Open Duck Mini's `antennas.py`. Commands are clamped to `limit` (0.9).
-  - `sign` and `trim` are per ear. Swap `gpio`/`pwm_channel` if left and right turn out to be the other way round.
+  - `sign` and `trim` are per ear. `"enabled": false` stops an ear from ever being driven (e.g. a 360° continuous servo fitted by mistake, which spins instead of holding a position). Swap `gpio`/`pwm_channel` if left and right turn out to be the other way round.
   - Until the first command the servos get no pulses, so starting the service never moves them. `POST /ears/release` stops the pulses again.
   - Without the overlay, the ears fall back to lgpio software pulses (slight jitter).
   - Once the ears are in use they follow the expression (`"ears": [left, right]` in `expressions.json`).

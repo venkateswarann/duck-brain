@@ -227,9 +227,13 @@ class Ears:
         self._thread = threading.Thread(target=self._run, name="ears", daemon=True)
 
     def _open(self, side: str, mock: bool, lg_handle: Optional[int]):
+        ear = self.cfg[side]
+        if not ear.get("enabled", True):
+            # e.g. a 360-degree servo fitted by mistake: never drive it.
+            self.errors.append(f"{side} ear disabled in body_config.json")
+            return MockServo()
         if mock:
             return MockServo()
-        ear = self.cfg[side]
         try:
             return SysfsServo(int(self.cfg["pwm_chip"]), int(ear["pwm_channel"]))
         except OSError as exc:
