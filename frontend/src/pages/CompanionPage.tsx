@@ -182,6 +182,13 @@ export default function CompanionPage() {
             >
               center
             </button>
+            <button
+              className={`btn${head.idle_motion?.enabled ? " primary" : ""}`}
+              onClick={() => run("/api/head/idle_motion", { enabled: !head.idle_motion?.enabled })}
+              title="gentle breathing and sway layered on the head pose"
+            >
+              breathing {head.idle_motion?.enabled ? "on" : "off"}
+            </button>
           </div>
           <button
             className="btn"

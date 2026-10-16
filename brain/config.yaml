@@ -44,17 +44,21 @@ vision:
   # Questions that make the brain look through the camera before answering.
   trigger_words: ["see", "look", "holding", "hold", "this", "what is", "wearing", "show", "colour", "color", "who am i", "in front"]
 
+head:
+  breathing: true                    # gentle breathing/sway idle motion while the brain runs
+
 tracking:
   enabled: true
-  rate_hz: 3
+  rate_hz: 6
   horizontal_fov_deg: 54             # OV5647 (Pi camera v1) ~54, v2 ~62, v3 ~66
   vertical_fov_deg: 41
-  gain: 0.25                         # fraction of the angular error corrected per step
-  deadband: 0.18                     # ignore errors smaller than this (normalised)
+  gain: 0.6                          # how far toward the face each update aims (1 = all the way)
+  smoothing: 0.5                     # 0 = raw detections, closer to 1 = calmer but slower
+  deadband: 0.08                     # face this close to centre: hold (breathing continues)
   yaw_sign: -1                       # flip if the head turns away from faces
   pitch_sign: 1
   eyes_x_sign: 1                     # flip if the eyes look away from faces
-  min_step_deg: 1.5                 # skip head moves smaller than this (fewer servo current spikes)
+  min_step_deg: 0.5                  # skip updates smaller than this
   greet_on_face: true
   greet_after_absent_s: 20
   center_after_lost_s: 8

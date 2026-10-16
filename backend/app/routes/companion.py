@@ -38,6 +38,12 @@ class TiltReq(BaseModel):
     angle: float = Field(description="Head roll in degrees, about -20..20 (curious head tilt).")
 
 
+class IdleMotionReq(BaseModel):
+    enabled: bool = Field(description="Breathing/sway idle motion on or off.")
+    breath_deg: Optional[float] = Field(default=None, description="Breath amplitude in degrees (0-4).")
+    sway_deg: Optional[float] = Field(default=None, description="Sway amplitude in degrees (0-4).")
+
+
 class ExpressionReq(BaseModel):
     name: str = Field(description="Expression name, see eyes_list_expressions (e.g. happy, sad, thinking).")
     hold_s: Optional[float] = Field(default=None, ge=0, le=60,
@@ -139,6 +145,12 @@ async def head_stop(request: Request):
 async def head_state(request: Request):
     """Current head joint angles, targets, limits and recent safety events."""
     return _head(request).snapshot()
+
+
+@router.post("/api/head/idle_motion", operation_id="head_idle_motion")
+async def head_idle_motion(req: IdleMotionReq, request: Request):
+    """Turn the gentle breathing/sway idle motion on or off. It's layered on every pose and stays within limits."""
+    return _head(request).set_idle_motion(req.enabled, req.breath_deg, req.sway_deg)
 
 
 # ------------------------------------------------------------------ eyes

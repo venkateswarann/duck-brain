@@ -28,7 +28,8 @@ from .trace import Trace
 from .tracking import FaceTracker
 
 HERE = Path(__file__).resolve().parent
-EST_GESTURE_S = {"nod": 0.55, "shake_head": 0.8, "tilt_head": 0.6, "look_at": 0.8, "center": 0.8}
+# Seconds per repetition with the robot's eased motion profile.
+EST_GESTURE_S = {"nod": 1.3, "shake_head": 1.6, "tilt_head": 1.0, "look_at": 1.2, "center": 1.2}
 
 
 class Brain:
@@ -49,6 +50,8 @@ class Brain:
         self._turn_lock = asyncio.Lock()
         self._pending: Optional[tuple[str, str]] = None
         self.turns = 0
+        self.breathing = bool(cfg.get("head", {}).get("breathing", True))
+        self._estop_at = 0.0
 
     # ------------------------------------------------------------------ startup
 
@@ -57,6 +60,7 @@ class Brain:
                              tracking=self.tracker.enabled, link="offline")
         await self.robot.discover()
         await self.refresh_robot_info()
+        await self.set_breathing(self.breathing)
         try:
             await self.llm.check()
             self.trace.emit("llm", status="ok", detail=f"{self.llm.model} via Ollama, warming up")
@@ -93,6 +97,14 @@ class Brain:
         except Exception:  # noqa: BLE001
             pass
         self.trace.set_state(expressions=self.safety.expressions)
+
+    async def set_breathing(self, on: bool) -> None:
+        try:
+            r = await self.robot.post("/api/head/idle_motion", {"enabled": on})
+            if isinstance(r, dict) and r.get("ok"):
+                self.trace.set_state(breathing=on)
+        except RobotOffline:
+            pass
 
     async def _refresh_loop(self) -> None:
         while True:
@@ -141,6 +153,8 @@ class Brain:
                 await self._turn(*nxt)
 
     async def estop(self, reason: str) -> None:
+        self._estop_at = time.monotonic()
+        self.trace.set_state(breathing=False)
         self.trace.emit("safety", status="estop", detail=f"E-STOP ({reason}); bypassed the LLM")
         try:
             result = await self.robot.post("/api/estop")
@@ -195,6 +209,9 @@ class Brain:
             if self.memory.remember(key, value):
                 self.trace.emit("memory", detail=f"remembered {key} = {value}")
         self.trace.emit("turn", seconds=round(time.monotonic() - started, 2), turn=self.turns)
+        # A STOP switches breathing off on the robot; bring it back once things are calm.
+        if self.breathing and time.monotonic() - self._estop_at > 10:
+            await self.set_breathing(True)
 
     async def _gesture(self, d: Decision) -> None:
         args = {k: v for k, v in d.args.items() if not k.startswith("_")}

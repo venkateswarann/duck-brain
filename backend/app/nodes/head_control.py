@@ -51,6 +51,13 @@ class HeadControlNode(Node):
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._cmd = {j: 0.0 for j in HEAD_JOINTS}  # degrees, what we send
+        self._vel = {j: 0.0 for j in HEAD_JOINTS}  # deg/s of the smoothed motion
+        # Breathing/sway layer. Off at boot (the head never moves by itself);
+        # the brain or the Duck page turns it on.
+        self._idle_on = False
+        self._idle_gain = 0.0  # fades in/out so toggling never jumps
+        self._idle_params = self.cfg.idle_motion.model_copy()
+        self._t0 = time.monotonic()
         self._target = {j: 0.0 for j in HEAD_JOINTS}
         self._present: dict[str, Optional[float]] = {j: None for j in HEAD_JOINTS}
         self._queue: deque[tuple[dict[str, float], float]] = deque()  # (pose, dwell_s)
@@ -175,8 +182,11 @@ class HeadControlNode(Node):
         (Not named stop(): that's the Node lifecycle method.)"""
         with self._lock:
             self._queue.clear()
+            self._idle_on = False
+            self._idle_gain = 0.0
             for j in HEAD_JOINTS:
                 self._target[j] = self._cmd[j]
+                self._vel[j] = 0.0
             self._dwell_until = 0.0
         return self._result("stop", applied={k: round(v, 1) for k, v in self._cmd.items()})
 
@@ -190,6 +200,7 @@ class HeadControlNode(Node):
                 "target_deg": {k: round(v, 2) for k, v in self._target.items()},
                 "present_deg": {k: (None if v is None else round(v, 2)) for k, v in self._present.items()},
                 "queued": len(self._queue),
+                "idle_motion": {"enabled": self._idle_on, **self._idle_params.model_dump()},
                 "limits": {k: v.model_dump() for k, v in self.cfg.head_limits.items()},
                 "recent_events": list(self.events)[-10:],
             }
@@ -313,13 +324,59 @@ class HeadControlNode(Node):
             self.events.append({"ts": time.time(), "kind": "timeout", "command": "hold", "reasons": ["returned to centre"]})
             self._target = {j: 0.0 for j in HEAD_JOINTS}
             self._last_cmd_at = now
-        step = self.cfg.max_vel_dps * dt
+        # Breathing fades in when enabled and drops to a third during gestures.
+        want = (0.35 if self._queue else 1.0) if self._idle_on else 0.0
+        self._idle_gain += (want - self._idle_gain) * min(1.0, dt / 1.5)
+        offsets = self._idle_offsets(now - self._t0)
+
+        # Critically damped spring toward target + breathing, with acceleration
+        # and speed caps: every move eases in and out, and a new target mid-move
+        # bends the path instead of restarting it.
+        w = 4.0 / max(0.1, self.cfg.response_s)
+        amax = self.cfg.max_acc_dps2
+        vmax = self.cfg.max_vel_dps
         for j in HEAD_JOINTS:
-            err = self._target[j] - self._cmd[j]
-            self._cmd[j] += max(-step, min(step, err))
+            desired = self._clamp_joint(j, self._target[j] + offsets.get(j, 0.0) * self._idle_gain)
+            acc = w * w * (desired - self._cmd[j]) - 2.0 * w * self._vel[j]
+            acc = max(-amax, min(amax, acc))
+            self._vel[j] = max(-vmax, min(vmax, self._vel[j] + acc * dt))
+            self._cmd[j] = self._clamp_joint(j, self._cmd[j] + self._vel[j] * dt)
+
+    def _idle_offsets(self, t: float) -> dict[str, float]:
+        """Slow breath on pitch plus an aperiodic sway (sum of incommensurate sines)."""
+        p = self._idle_params
+        tau = 2 * math.pi
+        breath = p.breath_deg * math.sin(tau * p.breath_hz * t)
+        sway = p.sway_deg * (0.6 * math.sin(tau * 0.047 * t) + 0.4 * math.sin(tau * 0.113 * t + 1.3))
+        roll = 0.5 * p.sway_deg * math.sin(tau * 0.071 * t + 2.1)
+        return {"head_pitch": breath, "head_yaw": sway, "head_roll": roll}
+
+    def _clamp_joint(self, joint: str, value: float) -> float:
+        lim = self.cfg.head_limits.get(joint)
+        return value if lim is None else min(max(value, lim.min_deg), lim.max_deg)
+
+    def set_idle_motion(self, enabled: bool, breath_deg: Optional[float] = None,
+                        sway_deg: Optional[float] = None) -> dict[str, Any]:
+        """Turn the breathing/sway layer on or off (amplitudes capped at 4 degrees)."""
+        clamped = []
+        with self._lock:
+            for name, value in (("breath_deg", breath_deg), ("sway_deg", sway_deg)):
+                if value is None:
+                    continue
+                if not _finite(value):
+                    return self._reject("idle_motion", f"{name} must be a number")
+                c = min(max(float(value), 0.0), 4.0)
+                if c != float(value):
+                    clamped.append(f"{name} {value} -> {c:g} (max 4)")
+                setattr(self._idle_params, name, c)
+            self._idle_on = bool(enabled)
+        return self._result("idle_motion", applied={"enabled": self._idle_on, **self._idle_params.model_dump()},
+                            clamped=clamped)
 
     def _at_target(self) -> bool:
-        return all(abs(self._target[j] - self._cmd[j]) < 0.5 for j in HEAD_JOINTS)
+        # Gestures advance once the smoothed motion is close and has nearly stopped.
+        return all(abs(self._target[j] - self._cmd[j]) < 1.5 and abs(self._vel[j]) < 25
+                   for j in HEAD_JOINTS)
 
     async def _publish_loop(self) -> None:
         while True:

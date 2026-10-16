@@ -14,6 +14,7 @@ The base URL is the robot's Pi 4, for example `http://duckpi4.local:8000`. All b
 | `head_center` | `POST /api/head/center` | none |
 | `head_stop` | `POST /api/head/stop` | none |
 | `head_state` | `GET /api/head/state` | none |
+| `head_idle_motion` | `POST /api/head/idle_motion` | `{"enabled": true, "breath_deg": 1.5, "sway_deg": 2}` |
 
 Command responses:
 
@@ -23,7 +24,8 @@ Command responses:
 ```
 
 `ok: false` means the command was rejected, for example by the rate limit or a non-numeric value. `reasons` says why.
-`head_state` returns `command_deg`, `target_deg`, `present_deg`, `limits`, `queued` and `recent_events`.
+`head_state` returns `command_deg`, `target_deg`, `present_deg`, `limits`, `queued`, `idle_motion` and `recent_events`.
+All motion is eased: a critically damped spring with speed and acceleration caps, so frequent small targets blend into one smooth movement.
 
 ## Eyes (`eyes.link` node, proxied to the head Pi Zero)
 

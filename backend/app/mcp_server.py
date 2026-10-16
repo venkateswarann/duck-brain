@@ -54,6 +54,7 @@ _COMPANION_OPS = [
     "head_center",
     "head_stop",
     "head_state",
+    "head_idle_motion",
     "eyes_list_expressions",
     "eyes_set_expression",
     "eyes_look",

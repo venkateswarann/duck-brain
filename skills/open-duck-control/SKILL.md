@@ -35,6 +35,7 @@ never try to move the legs.
 | `head_nod` / `head_shake` | `times` (1-3) | Yes / no |
 | `head_tilt` | `angle` (degrees, about ±20) | Curious or confused tilt |
 | `head_center` | none | Neutral pose |
+| `head_idle_motion` | `enabled`, optional `breath_deg`, `sway_deg` (0-4) | Gentle breathing and sway layered on any pose, which feels alive |
 | `head_stop` | none | Freeze the head where it is |
 | `eyes_set_expression` | `name`, optional `hold_s` | Show a feeling |
 | `eyes_list_expressions` | none | Valid expression names |

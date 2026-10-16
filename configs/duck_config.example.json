@@ -196,12 +196,19 @@
       }
     },
     "max_vel_dps": 60,
+    "max_acc_dps2": 240,
+    "response_s": 0.45,
     "control_hz": 50,
     "head_kp": 8,
     "cmd_rate_hz": 10,
     "gesture_max_times": 3,
     "hold_timeout_s": 20,
     "camera_stream": "head_cam",
+    "idle_motion": {
+      "breath_deg": 1.5,
+      "breath_hz": 0.22,
+      "sway_deg": 2.0
+    },
     "audio": {
       "mic_device": null,
       "speaker_device": null,
