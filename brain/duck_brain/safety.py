@@ -24,7 +24,22 @@ GESTURES: dict[str, tuple[str, tuple[str, ...]]] = {
     "tilt_head": ("head_tilt", ("angle",)),
     "look_at": ("head_look_at", ("yaw", "pitch", "hold_s")),
     "center": ("head_center", ()),
+    "wiggle_ears": ("ears_gesture", ("times",)),
+    "perk_ears": ("ears_gesture", ()),
+    "droop_ears": ("ears_gesture", ()),
+    "lamp_on": ("lamp_set", ()),
+    "lamp_off": ("lamp_set", ()),
+    "blink_lamp": ("lamp_blink", ("times",)),
 }
+# Arguments the gesture always sends, which Gemma doesn't choose.
+FIXED_ARGS: dict[str, dict[str, Any]] = {
+    "wiggle_ears": {"name": "wiggle"},
+    "perk_ears": {"name": "perk"},
+    "droop_ears": {"name": "droop"},
+    "lamp_on": {"on": True},
+    "lamp_off": {"on": False},
+}
+HEAD_TOOLS = {"head_nod", "head_shake", "head_tilt", "head_look_at", "head_center"}
 
 
 @dataclass
@@ -139,6 +154,7 @@ class SafetyLayer:
                 d.note("clamped", f"hold {hold:g}s -> {self.max_hold_s:g}s (no staring forever)")
                 hold = self.max_hold_s
             d.args["_hold_s"] = hold
+        d.args.update(FIXED_ARGS.get(name, {}))
         return d
 
     def _clamp(self, d: Decision, joint: str, value: float, label: str) -> float:

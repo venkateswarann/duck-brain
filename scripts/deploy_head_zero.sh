@@ -52,7 +52,7 @@ cd "\$DIR"
 if [[ "$INSTALL" -eq 1 ]]; then
   echo "--- apt packages (only what's missing; the Zero's SD card is small) ---"
   missing=()
-  for pkg in python3-venv python3-pil python3-numpy python3-spidev python3-rpi.gpio \
+  for pkg in python3-venv python3-pil python3-numpy python3-spidev python3-rpi.gpio python3-lgpio \
              python3-picamera2 fonts-dejavu-core; do
     dpkg -s "\$pkg" >/dev/null 2>&1 || missing+=("\$pkg")
   done
@@ -68,6 +68,16 @@ if [[ "$INSTALL" -eq 1 ]]; then
   if ! grep -qs '^dtparam=spi=on' /boot/firmware/config.txt; then
     echo "Enabling SPI (takes effect after reboot)"
     echo 'dtparam=spi=on' | sudo tee -a /boot/firmware/config.txt >/dev/null
+  fi
+  # Ears on hardware PWM (GPIO 12/13), lamp on GPIO 1 held low (off) from boot.
+  # force_eeprom_read=0 stops the firmware probing for a HAT EEPROM on GPIO 0/1,
+  # which would flicker the lamp. Takes effect after a reboot; until then the
+  # ears use lgpio software pulses.
+  if ! grep -qs '# duck ears+lamp' /boot/firmware/config.txt; then
+    echo "Adding the ear PWM overlay and lamp pin default to config.txt (reboot to apply)"
+    printf '%s\n' '' '[all]' '# duck ears+lamp' \
+      'dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4' 'gpio=1=op,dl' 'force_eeprom_read=0' \
+      | sudo tee -a /boot/firmware/config.txt >/dev/null
   fi
   echo "--- python venv (system site packages for picamera2/spidev) ---"
   [[ -d .venv ]] || python3 -m venv --system-site-packages .venv

@@ -1,13 +1,13 @@
 {
-  "neutral":    {"up_in": 0.1,  "up_out": 0.1,  "dn_in": 0.0,  "dn_out": 0.0,  "pupil": 1.0},
-  "happy":      {"up_in": 0.1,  "up_out": 0.1,  "dn_in": 0.5,  "dn_out": 0.5,  "pupil": 1.25},
-  "sad":        {"up_in": 0.4,  "up_out": 0.8,  "dn_in": 0.3,  "dn_out": 0.3,  "pupil": 1.15},
-  "angry":      {"up_in": 0.75, "up_out": 0.35, "dn_in": 0.3,  "dn_out": 0.2,  "pupil": 0.7},
-  "surprised":  {"up_in": -0.1, "up_out": -0.1, "dn_in": -0.1, "dn_out": -0.1, "pupil": 0.5},
-  "sleepy":     {"up_in": 0.7,  "up_out": 0.7,  "dn_in": 0.2,  "dn_out": 0.2,  "pupil": 1.0},
-  "thinking":   {"up_in": 0.3,  "up_out": 0.15, "dn_in": 0.15, "dn_out": 0.1,  "pupil": 0.9,  "gaze": [0.55, -0.6]},
-  "listening":  {"up_in": 0.0,  "up_out": 0.05, "dn_in": 0.1,  "dn_out": 0.1,  "pupil": 1.15},
-  "curious":    {"up_in": 0.0,  "up_out": 0.2,  "dn_in": 0.15, "dn_out": 0.15, "pupil": 1.3},
-  "suspicious": {"up_in": 0.55, "up_out": 0.5,  "dn_in": 0.45, "dn_out": 0.4,  "pupil": 0.8,  "gaze": [-0.5, 0.0]},
-  "grumpy":     {"up_in": 0.6,  "up_out": 0.25, "dn_in": 0.35, "dn_out": 0.35, "pupil": 0.85, "gaze": [0.0, 0.3]}
+  "neutral":    {"up_in": 0.1,  "up_out": 0.1,  "dn_in": 0.0,  "dn_out": 0.0,  "pupil": 1.0, "ears": [0, 0]},
+  "happy":      {"up_in": 0.1,  "up_out": 0.1,  "dn_in": 0.5,  "dn_out": 0.5,  "pupil": 1.25, "ears": [0.6, 0.6]},
+  "sad":        {"up_in": 0.4,  "up_out": 0.8,  "dn_in": 0.3,  "dn_out": 0.3,  "pupil": 1.15, "ears": [-0.7, -0.7]},
+  "angry":      {"up_in": 0.75, "up_out": 0.35, "dn_in": 0.3,  "dn_out": 0.2,  "pupil": 0.7, "ears": [-0.4, -0.4]},
+  "surprised":  {"up_in": -0.1, "up_out": -0.1, "dn_in": -0.1, "dn_out": -0.1, "pupil": 0.5, "ears": [0.9, 0.9]},
+  "sleepy":     {"up_in": 0.7,  "up_out": 0.7,  "dn_in": 0.2,  "dn_out": 0.2,  "pupil": 1.0, "ears": [-0.6, -0.6]},
+  "thinking":   {"up_in": 0.3,  "up_out": 0.15, "dn_in": 0.15, "dn_out": 0.1,  "pupil": 0.9,  "gaze": [0.55, -0.6], "ears": [0.3, -0.2]},
+  "listening":  {"up_in": 0.0,  "up_out": 0.05, "dn_in": 0.1,  "dn_out": 0.1,  "pupil": 1.15, "ears": [0.7, 0.7]},
+  "curious":    {"up_in": 0.0,  "up_out": 0.2,  "dn_in": 0.15, "dn_out": 0.15, "pupil": 1.3, "ears": [0.6, 0.1]},
+  "suspicious": {"up_in": 0.55, "up_out": 0.5,  "dn_in": 0.45, "dn_out": 0.4,  "pupil": 0.8,  "gaze": [-0.5, 0.0], "ears": [-0.2, 0.3]},
+  "grumpy":     {"up_in": 0.6,  "up_out": 0.25, "dn_in": 0.35, "dn_out": 0.35, "pupil": 0.85, "gaze": [0.0, 0.3], "ears": [-0.5, -0.3]}
 }

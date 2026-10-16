@@ -34,6 +34,8 @@ export default function CompanionPage() {
   const head = companion.head ?? {};
   const eyes = companion.eyes ?? {};
   const audio = companion.audio ?? {};
+  const ears = companion.ears ?? {};
+  const lamp = companion.lamp ?? {};
 
   const [status, setStatus] = useState<any>({});
   const [expressions, setExpressions] = useState<string[]>([]);
@@ -41,6 +43,8 @@ export default function CompanionPage() {
   const [previewTick, setPreviewTick] = useState(0);
   const [pose, setPose] = useState({ yaw: 0, pitch: 0, roll: 0 });
   const [sayText, setSayText] = useState("");
+  const [earPose, setEarPose] = useState({ left: 0, right: 0 });
+  const earTimer = useRef<number | undefined>(undefined);
   const poseTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -75,6 +79,12 @@ export default function CompanionPage() {
       () => run("/api/head/look_at", { yaw: next.yaw, pitch: next.pitch, roll: next.roll }),
       90,
     );
+  };
+
+  const sendEars = (next: typeof earPose) => {
+    setEarPose(next);
+    window.clearTimeout(earTimer.current);
+    earTimer.current = window.setTimeout(() => run("/api/ears/set", next), 60);
   };
 
   const onGaze = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -119,6 +129,8 @@ export default function CompanionPage() {
         <span className="btn-row">
           <Dot on={status.servos?.ok} label="head" detail={head.mock ? "mock" : `${status.servos?.found ?? 0}/4`} />
           <Dot on={eyes.online} label="eyes" detail={eyes.url ?? "offline"} />
+          <Dot on={status.ears?.ok} label="ears" detail={status.ears?.driver ?? undefined} />
+          <Dot on={status.lamp?.ok} label="lamp" detail={lamp.on ? "on" : undefined} />
           <Dot on={audio.mic} label="mic" />
           <Dot on={audio.speaker} label="speaker" detail={audio.speaking ? "talking" : undefined} />
           <Dot on={status.camera?.live} label="camera" />
@@ -205,6 +217,73 @@ export default function CompanionPage() {
               {last.command ?? ""} {(last.reasons ?? []).join("; ")} {last.detail ?? ""}
             </div>
           )}
+        </section>
+
+        <section className="card" style={card}>
+          <h3 style={h3}>Ears &amp; lamp</h3>
+          {(["left", "right"] as const).map((side) => (
+            <label key={side} style={{ display: "block", marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>{side} ear</span>
+                <span className="muted">
+                  {earPose[side].toFixed(2)} (now {ears.position?.[side] ?? "–"})
+                </span>
+              </div>
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.05}
+                value={earPose[side]}
+                onChange={(e) => sendEars({ ...earPose, [side]: Number(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+            </label>
+          ))}
+          <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+            -1 back/down · 0 neutral · +1 up/forward (clamped to ±{ears.limit ?? 0.9}) · driver {ears.driver ?? "–"}
+            {ears.active === false ? " · not driven yet" : ""}
+          </div>
+          <div className="btn-row" style={{ marginBottom: 12 }}>
+            {["wiggle", "perk", "droop", "flick_left", "flick_right", "alert"].map((g) => (
+              <button key={g} className="btn" onClick={() => run("/api/ears/gesture", { name: g, times: 2 })}>
+                {g.replace("_", " ")}
+              </button>
+            ))}
+            <button
+              className={`btn${ears.idle ? " primary" : ""}`}
+              onClick={() => run("/api/ears/idle", { enabled: !ears.idle })}
+              title="occasional ear twitches"
+            >
+              twitch {ears.idle ? "on" : "off"}
+            </button>
+            <button className="btn" onClick={() => run("/api/ears/release")} title="stop the servo pulses">
+              release
+            </button>
+          </div>
+          <div className="btn-row" style={{ alignItems: "center" }}>
+            <button
+              className={`btn${lamp.on ? " primary" : ""}`}
+              onClick={() => run("/api/lamp/set", { on: !lamp.on })}
+            >
+              lamp {lamp.on ? "on" : "off"}
+            </button>
+            <button className="btn" onClick={() => run("/api/lamp/blink", { times: 3 })}>blink</button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={lamp.brightness ?? 0}
+              onChange={(e) => run("/api/lamp/set", { brightness: Number(e.target.value) })}
+              style={{ flex: 1 }}
+              title="brightness"
+            />
+          </div>
+          {lamp.error && <div style={{ color: "var(--danger)", fontSize: 12 }}>lamp: {lamp.error}</div>}
+          {(ears.errors ?? []).map((e: string) => (
+            <div key={e} style={{ color: "var(--warn)", fontSize: 12 }}>{e}</div>
+          ))}
         </section>
 
         <section className="card" style={card}>

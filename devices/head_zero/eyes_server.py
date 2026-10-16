@@ -4,7 +4,8 @@
     python3 eyes_server.py                 # real GC9A01 displays
     python3 eyes_server.py --mock          # no hardware, preview only
 
-DCS on the Pi 4 proxies these routes under /api/eyes/*.
+DCS on the Pi 4 proxies these routes under /api/eyes/*, and the ear servo and
+head lamp routes (/ears*, /lamp*, body_io.py) under /api/ears/* and /api/lamp/*.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from body_io import Body
 from eye_engine import EyeEngine
 from eye_renderer import (
     HEIGHT,
@@ -57,22 +59,45 @@ class CalibrationReq(BaseModel):
     right: EyeCalibration
 
 
+class EarsReq(BaseModel):
+    left: Optional[float] = None  # -1..1, clamped to body_config "limit"
+    right: Optional[float] = None
+
+
+class EarGestureReq(BaseModel):
+    name: str
+    times: int = 1  # capped at 3
+
+
+class LampReq(BaseModel):
+    on: Optional[bool] = None
+    brightness: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class LampBlinkReq(BaseModel):
+    times: int = Field(default=2, ge=1, le=10)
+
+
 def create_app(mock: bool, fps: float) -> FastAPI:
     calibration = load_calibration()
     expressions = load_expressions()
     engine = EyeEngine(open_displays(mock, calibration), expressions, fps=fps)
+    body = Body(mock)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         engine.start()
+        body.start()
         yield
+        body.stop()
         engine.stop()
 
     app = FastAPI(title="Duck Eyes", lifespan=lifespan)
 
     @app.get("/health")
     def health():
-        return {"ok": True, "mock": mock, "frames": engine.frames}
+        return {"ok": True, "mock": mock, "frames": engine.frames,
+                "ears": body.ears.kind, "lamp": body.lamp.dev.kind}
 
     @app.get("/expressions")
     def expressions_list():
@@ -88,6 +113,7 @@ def create_app(mock: bool, fps: float) -> FastAPI:
             engine.set_expression(req.name, req.hold_s)
         except KeyError:
             raise HTTPException(404, f"unknown expression '{req.name}'; have {list(expressions)}")
+        body.on_expression(expressions[req.name].get("ears"))
         return engine.state()
 
     @app.post("/look")
@@ -117,6 +143,48 @@ def create_app(mock: bool, fps: float) -> FastAPI:
         buf = io.BytesIO()
         canvas.save(buf, format="PNG")
         return Response(buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    @app.get("/ears")
+    def ears_state():
+        return body.ears.state()
+
+    @app.post("/ears")
+    def ears_set(req: EarsReq):
+        return body.ears.set(req.left, req.right)
+
+    @app.post("/ears/gesture")
+    def ears_gesture(req: EarGestureReq):
+        try:
+            return body.ears.gesture(req.name, req.times)
+        except KeyError:
+            raise HTTPException(404, f"unknown ear gesture '{req.name}'; have {list(body.ears.state()['gestures'])}")
+
+    @app.post("/ears/idle")
+    def ears_idle(req: IdleReq):
+        body.ears.set_idle(req.enabled)
+        return body.ears.state()
+
+    @app.post("/ears/stop")
+    def ears_stop():
+        body.ears.halt()
+        return body.ears.state()
+
+    @app.post("/ears/release")
+    def ears_release():
+        body.ears.release()
+        return body.ears.state()
+
+    @app.get("/lamp")
+    def lamp_state():
+        return body.lamp.state()
+
+    @app.post("/lamp")
+    def lamp_set(req: LampReq):
+        return body.lamp.set(req.on, req.brightness)
+
+    @app.post("/lamp/blink")
+    def lamp_blink(req: LampBlinkReq):
+        return body.lamp.blink(req.times)
 
     @app.get("/calibration")
     def get_calibration():

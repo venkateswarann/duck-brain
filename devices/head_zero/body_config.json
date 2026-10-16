@@ -1,0 +1,14 @@
+{
+  "ears": {
+    "left":  {"gpio": 12, "pwm_channel": 0, "sign": 1,  "trim": 0.0},
+    "right": {"gpio": 13, "pwm_channel": 1, "sign": -1, "trim": 0.0},
+    "pwm_chip": 0,
+    "center_us": 1500,
+    "range_us": 500,
+    "limit": 0.9,
+    "max_speed": 4.0,
+    "follow_expressions": true,
+    "release_after_s": 0
+  },
+  "lamp": {"gpio": 1, "active_high": true, "pwm_hz": 200}
+}

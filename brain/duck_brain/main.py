@@ -23,13 +23,15 @@ from .hearing import Transcriber, local_mic_loop, robot_mic_loop
 from .llm import GemmaClient
 from .memory import Memory
 from .robot import Robot, RobotOffline
-from .safety import Decision, SafetyLayer
+from .safety import HEAD_TOOLS, Decision, SafetyLayer
 from .trace import Trace
 from .tracking import FaceTracker
 
 HERE = Path(__file__).resolve().parent
 # Seconds per repetition with the robot's eased motion profile.
-EST_GESTURE_S = {"nod": 1.3, "shake_head": 1.6, "tilt_head": 1.0, "look_at": 1.2, "center": 1.2}
+EST_GESTURE_S = {"nod": 1.3, "shake_head": 1.6, "tilt_head": 1.0, "look_at": 1.2, "center": 1.2,
+                 "wiggle_ears": 0.4, "perk_ears": 0.4, "droop_ears": 0.5, "lamp_on": 0.0, "lamp_off": 0.0,
+                 "blink_lamp": 0.4}
 
 
 class Brain:
@@ -51,6 +53,7 @@ class Brain:
         self._pending: Optional[tuple[str, str]] = None
         self.turns = 0
         self.breathing = bool(cfg.get("head", {}).get("breathing", True))
+        self.ear_twitch = bool(cfg.get("head", {}).get("ear_twitch", True))
         self._estop_at = 0.0
 
     # ------------------------------------------------------------------ startup
@@ -105,6 +108,12 @@ class Brain:
                 self.trace.set_state(breathing=on)
         except RobotOffline:
             pass
+        if self.ear_twitch:
+            try:
+                # Ears twitch now and then while the duck is "breathing".
+                await self.robot.post("/api/ears/idle", {"enabled": on})
+            except Exception:  # noqa: BLE001  (no ears / older eyes service)
+                pass
 
     async def _refresh_loop(self) -> None:
         while True:
@@ -215,11 +224,12 @@ class Brain:
 
     async def _gesture(self, d: Decision) -> None:
         args = {k: v for k, v in d.args.items() if not k.startswith("_")}
-        if d.tool in ("head_nod", "head_shake"):
-            args["times"] = int(args.get("times", 1))
+        if "times" in args:
+            args["times"] = int(args["times"])
         duration = EST_GESTURE_S.get(d.action, 0.6) * max(1, int(args.get("times", 1)))
         hold = d.args.get("_hold_s") or 0.0
-        self.tracker.pause(duration + hold + 1.0)
+        if d.tool in HEAD_TOOLS:
+            self.tracker.pause(duration + hold + 1.0)
         (result,) = await self.robot.call_tools([(d.tool, args)])
         self._trace_tool(result, d)
         if d.action == "look_at":

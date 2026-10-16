@@ -1,4 +1,4 @@
-"""Companion (Duck Brain) API: head gestures, eyes, speech and e-stop.
+"""Companion (Duck Brain) API: head gestures, eyes, ears, lamp, speech and e-stop.
 
 These routes are also MCP tools (see mcp_server.py, _COMPANION_OPS), so their
 docstrings and field descriptions are what an AI agent reads. Everything is
@@ -58,6 +58,25 @@ class EyesLookReq(BaseModel):
 
 class IdleReq(BaseModel):
     enabled: bool
+
+
+class EarsReq(BaseModel):
+    left: Optional[float] = Field(default=None, description="Left ear, -1 (back/down) .. 1 (forward/up); 0 is neutral. Omit to keep it.")
+    right: Optional[float] = Field(default=None, description="Right ear, -1 .. 1; 0 is neutral. Omit to keep it.")
+
+
+class EarGestureReq(BaseModel):
+    name: str = Field(description="wiggle, perk, droop, flick_left, flick_right or alert.")
+    times: int = Field(default=1, description="Repetitions for wiggle/alert (capped at 3).")
+
+
+class LampReq(BaseModel):
+    on: Optional[bool] = Field(default=None, description="Switch the head lamp on or off.")
+    brightness: Optional[float] = Field(default=None, ge=0, le=1, description="0..1; dims the lamp.")
+
+
+class LampBlinkReq(BaseModel):
+    times: int = Field(default=2, ge=1, le=5, description="Number of flashes (1-5).")
 
 
 class SayReq(BaseModel):
@@ -208,6 +227,57 @@ async def eyes_put_calibration(request: Request):
     return await _eyes_call(request, "PUT", "/calibration", await request.json())
 
 
+# ------------------------------------------------------------------ ears & lamp (head Pi Zero)
+
+
+@router.post("/api/ears/set", operation_id="ears_set")
+async def ears_set(req: EarsReq, request: Request):
+    """Move the ear servos. Each ear is -1..1 (0 neutral, positive = up/forward); out-of-range values are clamped and reported."""
+    return await _eyes_call(request, "POST", "/ears", req.model_dump(exclude_none=True))
+
+
+@router.post("/api/ears/gesture", operation_id="ears_gesture")
+async def ears_gesture(req: EarGestureReq, request: Request):
+    """Ear gesture: wiggle (playful), perk (interested), droop (sad/tired), flick_left/flick_right, alert (surprised)."""
+    return await _eyes_call(request, "POST", "/ears/gesture", req.model_dump())
+
+
+@router.post("/api/ears/idle", operation_id="ears_idle")
+async def ears_idle(req: IdleReq, request: Request):
+    """Turn occasional idle ear twitches on or off."""
+    return await _eyes_call(request, "POST", "/ears/idle", req.model_dump())
+
+
+@router.post("/api/ears/release", operation_id="ears_release")
+async def ears_release(request: Request):
+    """Stop driving the ear servos (they go limp)."""
+    return await _eyes_call(request, "POST", "/ears/release")
+
+
+@router.get("/api/ears/state", operation_id="ears_state")
+async def ears_state(request: Request):
+    """Ear positions, targets, limit, driver and available gestures."""
+    return await _eyes_call(request, "GET", "/ears")
+
+
+@router.post("/api/lamp/set", operation_id="lamp_set")
+async def lamp_set(req: LampReq, request: Request):
+    """Switch the head lamp on/off or set its brightness (0..1)."""
+    return await _eyes_call(request, "POST", "/lamp", req.model_dump(exclude_none=True))
+
+
+@router.post("/api/lamp/blink", operation_id="lamp_blink")
+async def lamp_blink(req: LampBlinkReq, request: Request):
+    """Flash the head lamp a few times."""
+    return await _eyes_call(request, "POST", "/lamp/blink", req.model_dump())
+
+
+@router.get("/api/lamp/state", operation_id="lamp_state")
+async def lamp_state(request: Request):
+    """Whether the head lamp is on, and its brightness."""
+    return await _eyes_call(request, "GET", "/lamp")
+
+
 # ------------------------------------------------------------------ speech
 
 
@@ -249,7 +319,7 @@ async def ws_audio(ws: WebSocket):
 
 @router.post("/api/estop", operation_id="estop")
 async def estop(request: Request):
-    """Emergency stop: freeze the head, set the eyes to neutral and stop talking. Always allowed."""
+    """Emergency stop: freeze the head and ears, set the eyes to neutral and stop talking. Always allowed."""
     registry = request.app.state.registry
     done: dict[str, Any] = {}
     head = registry.get_optional("head.control")
@@ -266,6 +336,12 @@ async def estop(request: Request):
             done["eyes"] = "neutral"
         except (EyesUnavailable, ValueError) as exc:
             done["eyes"] = f"unavailable: {exc}"
+        try:
+            # Ears hold where they are (no neutral jump, which would be a movement).
+            await eyes.request("POST", "/ears/stop")
+            done["ears"] = "stopped"
+        except (EyesUnavailable, ValueError) as exc:
+            done["ears"] = f"unavailable: {exc}"
     for node in (head, audio, eyes):
         if node is not None:
             node.log("ESTOP")
@@ -280,7 +356,7 @@ async def companion_heartbeat(req: HeartbeatReq, request: Request):
 
 @router.get("/api/companion/status", operation_id="companion_status")
 async def companion_status(request: Request):
-    """Robot readiness: head servos, eyes, mic/speaker, camera stream and brain heartbeat."""
+    """Robot readiness: head servos, eyes, ears, lamp, mic/speaker, camera stream and brain heartbeat."""
     registry = request.app.state.registry
     out: dict[str, Any] = {"ts": time.time()}
 
@@ -297,6 +373,12 @@ async def companion_status(request: Request):
     eyes = registry.get_optional("eyes.link")
     out["eyes"] = {"online": bool(isinstance(eyes, EyesLinkNode) and eyes.online),
                    "url": getattr(eyes, "url", None)}
+    ears = getattr(eyes, "ears_state", {}) if out["eyes"]["online"] else {}
+    out["ears"] = {"ok": bool(ears) and ears.get("driver") != "mock", "driver": ears.get("driver"),
+                   "active": ears.get("active", False), "errors": ears.get("errors", [])}
+    lamp = getattr(eyes, "lamp_state", {}) if out["eyes"]["online"] else {}
+    out["lamp"] = {"ok": bool(lamp) and lamp.get("driver") != "mock", "on": lamp.get("on", False),
+                   "brightness": lamp.get("brightness", 0.0), "error": lamp.get("error")}
 
     audio = registry.get_optional("audio.io")
     if isinstance(audio, AudioIONode) and audio.state == NodeState.RUNNING:

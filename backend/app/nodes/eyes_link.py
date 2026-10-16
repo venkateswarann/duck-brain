@@ -18,6 +18,9 @@ class EyesUnavailable(RuntimeError):
 class EyesLinkNode(Node):
     """Talks to the eyes service on the head Pi Zero (devices/head_zero/eyes_server.py).
 
+    The same service drives the ear servos and the head lamp, so those go
+    through this link too.
+
     companion.eyes_urls lists candidate addresses (USB link, LAN, Tailscale);
     the first that answers /health is used, and the list is probed again
     whenever the current one stops answering.
@@ -33,6 +36,8 @@ class EyesLinkNode(Node):
         self.urls = list(config.companion.eyes_urls)
         self.url: Optional[str] = None
         self.last_state: dict[str, Any] = {}
+        self.ears_state: dict[str, Any] = {}
+        self.lamp_state: dict[str, Any] = {}
         self._client: Optional[httpx.AsyncClient] = None
         self._config = {"eyes_urls": self.urls}
 
@@ -99,12 +104,21 @@ class EyesLinkNode(Node):
         while True:
             try:
                 self.last_state = await self.request("GET", "/state")
+                self.ears_state = await self.request("GET", "/ears")
+                self.lamp_state = await self.request("GET", "/lamp")
             except (EyesUnavailable, ValueError):
-                self.last_state = {}
+                # ValueError also covers an older eyes service without /ears.
+                self.ears_state, self.lamp_state = {}, {}
+                if not self.online:
+                    self.last_state = {}
             if was_online is not None and was_online != self.online:
                 self.log("eyes ONLINE" if self.online else "eyes OFFLINE; retrying")
             was_online = self.online
             await self.bus.update(
-                companion={"eyes": {"online": self.online, "url": self.url, "state": self.last_state}}
+                companion={
+                    "eyes": {"online": self.online, "url": self.url, "state": self.last_state},
+                    "ears": self.ears_state,
+                    "lamp": self.lamp_state,
+                }
             )
             await asyncio.sleep(1.0 if self.online else 3.0)

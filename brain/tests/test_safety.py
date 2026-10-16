@@ -65,3 +65,15 @@ def test_stop_words():
     assert s.is_stop("freeze")
     assert not s.is_stop("don't stopper the bottle")
     assert not s.is_stop("tell me a story")
+
+
+def test_ear_and_lamp_gestures_get_fixed_args():
+    s = layer()
+    plan = s.review({"say": "hi", "expression": "happy", "gestures": [
+        {"tool": "wiggle_ears", "args": {"times": 9}},
+        {"tool": "lamp_on", "args": {"on": False}},
+    ]})
+    wiggle, lamp = plan.gestures
+    assert wiggle.tool == "ears_gesture" and wiggle.args == {"times": 3, "name": "wiggle"}
+    assert wiggle.status == "clamped"
+    assert lamp.tool == "lamp_set" and lamp.args == {"on": True}

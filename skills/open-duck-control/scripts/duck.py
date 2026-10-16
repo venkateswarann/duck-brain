@@ -6,6 +6,9 @@
     python3 duck.py nod 2 | shake 2 | tilt 15 | center | stop
     python3 duck.py expression happy
     python3 duck.py gaze -0.5 0.2        # eyes only, -1..1
+    python3 duck.py ears 0.5 0.5          # left right, -1..1
+    python3 duck.py ear-gesture wiggle 2  # wiggle|perk|droop|flick_left|flick_right|alert
+    python3 duck.py lamp on | lamp off | lamp 0.4
     python3 duck.py say "Hello there!"
     python3 duck.py estop
 
@@ -52,6 +55,10 @@ def main() -> int:
         "expressions": ("GET", "/api/eyes/expressions", None),
         "gaze": ("POST", "/api/eyes/look", lambda: {"x": float(x[0]), "y": float(x[1])}),
         "blink": ("POST", "/api/eyes/blink", None),
+        "ears": ("POST", "/api/ears/set", lambda: {"left": float(x[0]), "right": float(x[1])}),
+        "ear-gesture": ("POST", "/api/ears/gesture", lambda: {"name": x[0], "times": int(x[1]) if len(x) > 1 else 1}),
+        "lamp": ("POST", "/api/lamp/set",
+                 lambda: {"on": x[0] == "on"} if x[0] in ("on", "off") else {"brightness": float(x[0])}),
         "say": ("POST", "/api/speech/say", lambda: {"text": " ".join(x)}),
         "estop": ("POST", "/api/estop", None),
     }

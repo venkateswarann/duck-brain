@@ -41,6 +41,21 @@ All motion is eased: a critically damped spring with speed and acceleration caps
 
 An unknown expression returns HTTP 400 listing the valid names. If the eyes are offline you get HTTP 503.
 
+## Ears and lamp (proxied to the head Pi Zero)
+
+| MCP tool | REST | Body |
+|---|---|---|
+| `ears_set` | `POST /api/ears/set` | `{"left": 0.5, "right": 0.5}` (-1..1, either optional; clamped to ±0.9) |
+| `ears_gesture` | `POST /api/ears/gesture` | `{"name": "wiggle", "times": 2}`; names: wiggle, perk, droop, flick_left, flick_right, alert |
+| `ears_idle` | `POST /api/ears/idle` | `{"enabled": true}` |
+| `ears_release` | `POST /api/ears/release` | none |
+| `ears_state` | `GET /api/ears/state` | none; `driver` is hw-pwm, sw-pwm or mock |
+| `lamp_set` | `POST /api/lamp/set` | `{"on": true}` or `{"brightness": 0.4}` |
+| `lamp_blink` | `POST /api/lamp/blink` | `{"times": 3}` (1-5) |
+| `lamp_state` | `GET /api/lamp/state` | none |
+
+Ear responses carry `clamped` and `reasons` like the head's. An unknown gesture returns HTTP 400.
+
 ## Speech (`audio.io` node)
 
 | MCP tool | REST | Body |
@@ -53,8 +68,8 @@ An unknown expression returns HTTP 400 listing the valid names. If the eyes are 
 
 | MCP tool | REST | Notes |
 |---|---|---|
-| `estop` | `POST /api/estop` | Always allowed. Freezes the head, sets the eyes to neutral and stops speech |
-| `companion_status` | `GET /api/companion/status` | `servos`, `eyes`, `audio`, `camera`, `brain` |
+| `estop` | `POST /api/estop` | Always allowed. Freezes the head and ears, sets the eyes to neutral and stops speech |
+| `companion_status` | `GET /api/companion/status` | `servos`, `eyes`, `ears`, `lamp`, `audio`, `camera`, `brain` |
 
 ## Camera
 
