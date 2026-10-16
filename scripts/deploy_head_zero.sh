@@ -6,7 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="bdxmini.local"
 USER_NAME=""
 DEST_NAME="duck-head"
-DCS_FALLBACK=""
+# Wi-Fi/Tailscale addresses of the Pi 4, used by the camera if the USB link is down.
+DCS_FALLBACK="http://rpi1.local:8000 http://rpi1:8000"
 INSTALL=1
 
 usage() {
@@ -19,8 +20,8 @@ hands over to duck-eyes.service (and duck-headcam.service) once the robot is rea
 
   --host          SSH host of the Zero (default: $HOST; a Tailscale name works too)
   --user          SSH user (default: your ssh config / current user)
-  --dcs-fallback  extra DCS URL for the camera if the USB link is down,
-                  e.g. http://pi4.local:8000
+  --dcs-fallback  space-separated DCS URLs for the camera if the USB link is
+                  down (default: "$DCS_FALLBACK")
   --no-install    copy files and restart services only (fast redeploy)
 EOF
 }

@@ -63,10 +63,14 @@ case "$ROLE" in
     add_config_line "dtoverlay=dwc2,dr_mode=host"
     nmcli connection delete "$CON" >/dev/null 2>&1 || true
     # method=shared: static 10.55.0.1, DHCP/DNS via dnsmasq and NAT to whatever uplink the Pi 4 has.
-    nmcli connection add type ethernet con-name "$CON" ethernet.mac-address "$HOST_MAC" \
+    # Match by interface name, not MAC: g_ether offers ECM and RNDIS, and if the
+    # host binds RNDIS the MAC is random. Priority beats NM's auto "Wired connection".
+    nmcli -t -f NAME,DEVICE connection show | awk -F: '$2=="usb0" && $1!="'"$CON"'" {print $1}' |
+      while read -r auto; do nmcli connection delete "$auto" >/dev/null; done
+    nmcli connection add type ethernet con-name "$CON" ifname usb0 \
       ipv4.method shared ipv4.addresses 10.55.0.1/24 ipv6.method ignore \
-      connection.autoconnect yes >/dev/null
-    echo "NetworkManager: $CON (MAC $HOST_MAC) = 10.55.0.1/24, sharing internet"
+      connection.autoconnect yes connection.autoconnect-priority 100 >/dev/null
+    echo "NetworkManager: $CON on usb0 = 10.55.0.1/24, sharing internet"
     ;;
   *)
     echo "Usage: sudo $0 {pi4|zero}" >&2
