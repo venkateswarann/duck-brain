@@ -288,6 +288,8 @@ async def companion_status(request: Request):
     if isinstance(head, HeadControlNode) and head.state == NodeState.RUNNING:
         st = head.snapshot()
         found = sum(1 for v in st["present_deg"].values() if v is not None)
+        # Mock mode reports simulated positions; never call that healthy.
+        found = 0 if st["mock"] else found
         out["servos"] = {"ok": found == 4, "found": found, "expected": 4, "mock": st["mock"]}
     else:
         out["servos"] = {"ok": False, "found": 0, "expected": 4, "detail": "head.control not running"}
