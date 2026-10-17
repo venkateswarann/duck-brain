@@ -6,6 +6,7 @@ import SystemNodesPage from "./pages/SystemNodesPage";
 import DevicesPage from "./pages/DevicesPage";
 import ScriptsPage from "./pages/ScriptsPage";
 import VizPage from "./pages/VizPage";
+import VizErrorBoundary from "./components/VizErrorBoundary";
 import CameraPage from "./pages/CameraPage";
 import BoardPinsPage from "./pages/BoardPinsPage";
 import ControlPage from "./pages/ControlPage";
@@ -91,7 +92,9 @@ export default function App() {
               flexDirection: "column",
             }}
           >
-            <VizPage />
+            <VizErrorBoundary>
+              <VizPage />
+            </VizErrorBoundary>
           </div>
 
           {/* Regular Routes Container */}
