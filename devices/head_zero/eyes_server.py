@@ -44,6 +44,10 @@ class LookReq(BaseModel):
     hold_s: Optional[float] = Field(default=None, ge=0, le=30)
 
 
+class ActionReq(BaseModel):
+    name: str
+
+
 class IdleReq(BaseModel):
     enabled: bool
 
@@ -129,6 +133,22 @@ def create_app(mock: bool, fps: float) -> FastAPI:
     def look(req: LookReq):
         engine.look(req.x, req.y, req.hold_s)
         return engine.state()
+
+    @app.get("/actions")
+    def actions_list():
+        from eye_styles import ACTIONS  # noqa: PLC0415
+
+        return list(ACTIONS)
+
+    @app.post("/action")
+    def eye_action(req: ActionReq):
+        try:
+            seconds = engine.action(req.name)
+        except KeyError:
+            from eye_styles import ACTIONS  # noqa: PLC0415
+
+            raise HTTPException(404, f"unknown eye action '{req.name}'; have {list(ACTIONS)}")
+        return {"ok": True, "action": req.name, "seconds": seconds}
 
     @app.post("/blink")
     def blink():

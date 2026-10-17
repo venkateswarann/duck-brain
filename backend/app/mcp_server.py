@@ -59,6 +59,8 @@ _COMPANION_OPS = [
     "eyes_set_expression",
     "eyes_look",
     "eyes_blink",
+    "eyes_action",
+    "eyes_list_actions",
     "eyes_idle",
     "eyes_state",
     "ears_set",

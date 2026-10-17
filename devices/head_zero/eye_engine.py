@@ -14,6 +14,7 @@ import time
 from typing import Any, Optional
 
 from eye_renderer import LID_KEYS, MAX_OFFSET, DualDisplay, draw_eye
+from eye_styles import ACTIONS, OVERLAYS, STYLES, action_frame
 
 EASE_FACTOR = 0.15
 EMOTION_EASE = 0.1
@@ -48,6 +49,8 @@ class EyeEngine:
         self._next_idle_move = 0.0
         self._next_blink = time.monotonic() + random.uniform(2, 5)
 
+        self._style_t0 = time.monotonic()
+        self._action: Optional[tuple[str, float]] = None
         self.frames = 0
         self.last_frame_ms = 0.0
         self._latest: Optional[tuple[Any, Any]] = None
@@ -58,6 +61,8 @@ class EyeEngine:
         if name not in self.expressions:
             raise KeyError(name)
         with self._lock:
+            if name != self.expression:
+                self._style_t0 = time.monotonic()
             self.expression = name
             self._expression_until = time.monotonic() + hold_s if hold_s else None
             bias = self.expressions[name].get("gaze")
@@ -70,6 +75,14 @@ class EyeEngine:
             self._gaze_target = _clamp_unit(x, y)
             self._manual_until = time.monotonic() + (hold_s or self.idle_after_s)
             return self._gaze_target
+
+    def action(self, name: str) -> float:
+        """Start a one-shot eye animation (wink, eye_roll...); returns its duration."""
+        if name not in ACTIONS:
+            raise KeyError(name)
+        with self._lock:
+            self._action = (name, time.monotonic())
+        return ACTIONS[name]
 
     def blink(self) -> None:
         with self._lock:
@@ -89,6 +102,8 @@ class EyeEngine:
                 "frames": self.frames,
                 "frame_ms": round(self.last_frame_ms, 1),
                 "fps_cap": self.fps,
+                "style": self.expressions[self.expression].get("style"),
+                "action": self._action[0] if self._action else None,
             }
 
     def latest_images(self) -> Optional[tuple[Any, Any]]:
@@ -148,12 +163,32 @@ class EyeEngine:
             return blink
 
     def _render(self, blink_factor: float) -> None:
+        now = time.monotonic()
         with self._lock:
-            ox = self._gaze[0] * MAX_OFFSET
-            oy = self._gaze[1] * MAX_OFFSET
+            preset = self.expressions[self.expression]
+            gaze = self._gaze
             state = dict(self._state)
-        left = draw_eye(ox, oy, state, blink_factor, is_left=True)
-        right = draw_eye(ox, oy, state, blink_factor, is_left=False)
+            style_t = now - self._style_t0
+            act = None
+            if self._action:
+                act = action_frame(self._action[0], now - self._action[1])
+                if act is None:
+                    self._action = None
+        style = STYLES.get(preset.get("style") or "")
+        if style is not None:
+            left, right = style(style_t, True), style(style_t, False)
+        else:
+            act = act or {}
+            lift = act.get("lift", 0.0)
+            gl = act.get("gaze_left", gaze)
+            gr = act.get("gaze_right", gaze)
+            bl = max(blink_factor, act.get("blink_left", 0.0))
+            br = max(blink_factor, act.get("blink_right", 0.0))
+            left = draw_eye(gl[0] * MAX_OFFSET, gl[1] * MAX_OFFSET + lift, state, bl, is_left=True)
+            right = draw_eye(gr[0] * MAX_OFFSET, gr[1] * MAX_OFFSET + lift, state, br, is_left=False)
+            overlay = OVERLAYS.get(preset.get("overlay") or "")
+            if overlay is not None:
+                left, right = overlay(left, style_t, True), overlay(right, style_t, False)
         self.display.show(left, right)
         self._latest = (left, right)
         self.frames += 1

@@ -31,7 +31,8 @@ HERE = Path(__file__).resolve().parent
 # Seconds per repetition with the robot's eased motion profile.
 EST_GESTURE_S = {"nod": 1.3, "shake_head": 1.6, "tilt_head": 1.0, "look_at": 1.2, "center": 1.2,
                  "wiggle_ears": 0.4, "perk_ears": 0.4, "droop_ears": 0.5, "lamp_on": 0.0, "lamp_off": 0.0,
-                 "blink_lamp": 0.4}
+                 "blink_lamp": 0.4, "wink": 0.7, "eye_roll": 1.4, "cross_eyes": 1.6, "look_around": 2.0,
+                 "happy_bounce": 1.3}
 
 
 class Brain:

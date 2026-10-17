@@ -53,17 +53,22 @@ head:
 
 tracking:
   enabled: true
-  rate_hz: 6
+  rate_hz: 12
   horizontal_fov_deg: 54             # OV5647 (Pi camera v1) ~54, v2 ~62, v3 ~66
   vertical_fov_deg: 41
-  gain: 0.6                          # how far toward the face each update aims (1 = all the way)
-  smoothing: 0.5                     # 0 = raw detections, closer to 1 = calmer but slower
-  deadband: 0.08                     # face this close to centre: hold (breathing continues)
+  gain: 0.7                          # how far toward the face each update aims (1 = all the way)
+  smoothing: 0.35                     # 0 = raw detections, closer to 1 = calmer but slower
+  deadband: 0.06                     # face this close to centre: hold (breathing continues)
   yaw_sign: -1                       # flip if the head turns away from faces
   pitch_sign: 1
   eyes_x_sign: 1                     # flip if the eyes look away from faces
-  min_step_deg: 0.5                  # skip updates smaller than this
+  min_step_deg: 0.4                  # skip updates smaller than this
   greet_on_face: true
+  reactions: true                    # starstruck on a new face, cross-eyed when very close, look around when you leave, winks
+  close_face_size: 0.45              # face width / image width that counts as "very close"
+  lost_after_s: 1.2                  # missed detections shorter than this don't count as leaving
+  head_rate_hz: 8                    # head commands per second (DCS allows 10)
+  min_confidence: 0.7                # YuNet face score threshold
   greet_after_absent_s: 20
   center_after_lost_s: 8
 

@@ -56,6 +56,10 @@ class EyesLookReq(BaseModel):
     hold_s: Optional[float] = Field(default=None, ge=0, le=30)
 
 
+class EyesActionReq(BaseModel):
+    name: str = Field(description="wink, eye_roll, cross_eyes, look_around, happy_bounce or double_blink.")
+
+
 class IdleReq(BaseModel):
     enabled: bool
 
@@ -193,7 +197,7 @@ async def eyes_list_expressions(request: Request):
 
 @router.post("/api/eyes/expression", operation_id="eyes_set_expression")
 async def eyes_set_expression(req: ExpressionReq, request: Request):
-    """Show an eye expression (happy, sad, angry, surprised, sleepy, thinking, listening, curious, suspicious, grumpy, neutral)."""
+    """Show an eye expression: happy, sad, angry, surprised, sleepy, thinking, listening, curious, suspicious, grumpy, neutral, or a cartoon one: love (hearts), starstruck (stars), dizzy (spirals), knocked_out (X X), laughing (^ ^), giggle (> <), bread_eyes, crying (tears), loading."""
     return await _eyes_call(request, "POST", "/expression", req.model_dump(exclude_none=True))
 
 
@@ -201,6 +205,18 @@ async def eyes_set_expression(req: ExpressionReq, request: Request):
 async def eyes_look(req: EyesLookReq, request: Request):
     """Move the eyes' gaze without moving the head. x and y are -1..1."""
     return await _eyes_call(request, "POST", "/look", req.model_dump(exclude_none=True))
+
+
+@router.get("/api/eyes/actions", operation_id="eyes_list_actions")
+async def eyes_list_actions(request: Request):
+    """List the one-shot eye animations (wink, eye_roll, cross_eyes...)."""
+    return await _eyes_call(request, "GET", "/actions")
+
+
+@router.post("/api/eyes/action", operation_id="eyes_action")
+async def eyes_action(req: EyesActionReq, request: Request):
+    """Play a short eye animation on top of the current expression: wink, eye_roll, cross_eyes, look_around, happy_bounce, double_blink."""
+    return await _eyes_call(request, "POST", "/action", req.model_dump())
 
 
 @router.post("/api/eyes/blink", operation_id="eyes_blink")

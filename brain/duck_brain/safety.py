@@ -30,6 +30,11 @@ GESTURES: dict[str, tuple[str, tuple[str, ...]]] = {
     "lamp_on": ("lamp_set", ()),
     "lamp_off": ("lamp_set", ()),
     "blink_lamp": ("lamp_blink", ("times",)),
+    "wink": ("eyes_action", ()),
+    "eye_roll": ("eyes_action", ()),
+    "cross_eyes": ("eyes_action", ()),
+    "look_around": ("eyes_action", ()),
+    "happy_bounce": ("eyes_action", ()),
 }
 # Arguments the gesture always sends, which Gemma doesn't choose.
 FIXED_ARGS: dict[str, dict[str, Any]] = {
@@ -38,6 +43,11 @@ FIXED_ARGS: dict[str, dict[str, Any]] = {
     "droop_ears": {"name": "droop"},
     "lamp_on": {"on": True},
     "lamp_off": {"on": False},
+    "wink": {"name": "wink"},
+    "eye_roll": {"name": "eye_roll"},
+    "cross_eyes": {"name": "cross_eyes"},
+    "look_around": {"name": "look_around"},
+    "happy_bounce": {"name": "happy_bounce"},
 }
 HEAD_TOOLS = {"head_nod", "head_shake", "head_tilt", "head_look_at", "head_center"}
 
