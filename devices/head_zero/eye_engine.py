@@ -14,7 +14,7 @@ import time
 from typing import Any, Optional
 
 from eye_renderer import LID_KEYS, MAX_OFFSET, DualDisplay, draw_eye
-from eye_styles import ACTIONS, OVERLAYS, STYLES, action_frame
+from eye_styles import ACTIONS, OVERLAYS, STYLES, action_frame, text_eye
 
 EASE_FACTOR = 0.15
 EMOTION_EASE = 0.1
@@ -51,6 +51,7 @@ class EyeEngine:
 
         self._style_t0 = time.monotonic()
         self._action: Optional[tuple[str, float]] = None
+        self._card: Optional[tuple[Any, Any, float]] = None  # (left img, right img, until)
         self.frames = 0
         self.last_frame_ms = 0.0
         self._latest: Optional[tuple[Any, Any]] = None
@@ -83,6 +84,18 @@ class EyeEngine:
         with self._lock:
             self._action = (name, time.monotonic())
         return ACTIONS[name]
+
+    def show_card(self, left: str, right: str, hold_s: float, color: tuple[int, int, int],
+                  left_sub: str = "", right_sub: str = "") -> None:
+        """Big text on each eye for hold_s seconds (games: the rank to play, a score...)."""
+        limg = text_eye(left, color, left_sub) if left else None
+        rimg = text_eye(right, color, right_sub) if right else None
+        with self._lock:
+            self._card = (limg, rimg, time.monotonic() + hold_s)
+
+    def clear_card(self) -> None:
+        with self._lock:
+            self._card = None
 
     def blink(self) -> None:
         with self._lock:
@@ -169,13 +182,21 @@ class EyeEngine:
             gaze = self._gaze
             state = dict(self._state)
             style_t = now - self._style_t0
+            card = self._card if self._card and now < self._card[2] else None
+            if self._card and card is None:
+                self._card = None
             act = None
             if self._action:
                 act = action_frame(self._action[0], now - self._action[1])
                 if act is None:
                     self._action = None
         style = STYLES.get(preset.get("style") or "")
-        if style is not None:
+        if card is not None and (card[0] is not None or card[1] is not None):
+            normal_l = draw_eye(gaze[0] * MAX_OFFSET, gaze[1] * MAX_OFFSET, state, blink_factor, is_left=True)
+            normal_r = draw_eye(gaze[0] * MAX_OFFSET, gaze[1] * MAX_OFFSET, state, blink_factor, is_left=False)
+            left = card[0] if card[0] is not None else normal_l
+            right = card[1] if card[1] is not None else normal_r
+        elif style is not None:
             left, right = style(style_t, True), style(style_t, False)
         else:
             act = act or {}

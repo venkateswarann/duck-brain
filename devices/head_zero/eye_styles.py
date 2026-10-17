@@ -130,6 +130,37 @@ def loading(t: float, is_left: bool) -> Image.Image:
     return img
 
 
+_FONTS: dict[int, Any] = {}
+
+
+def _font(size: int):
+    if size not in _FONTS:
+        from PIL import ImageFont  # noqa: PLC0415
+
+        try:
+            _FONTS[size] = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+        except OSError:
+            _FONTS[size] = ImageFont.load_default()
+    return _FONTS[size]
+
+
+def text_eye(text: str, color: tuple[int, int, int] = (245, 250, 255), sub: str = "") -> Image.Image:
+    """Big text on a round eye (a card rank, a score...), sized to fit inside the bezel."""
+    img, d = _canvas()
+    d.ellipse((C - 100, C - 100, C + 100, C + 100), outline=color, width=6)
+    size = {1: 124, 2: 92, 3: 70}.get(len(text), 52)
+    f = _font(size)
+    box = d.textbbox((0, 0), text, font=f)
+    tw, th = box[2] - box[0], box[3] - box[1]
+    y = C - th / 2 - box[1] - (14 if sub else 0)
+    d.text((C - tw / 2 - box[0], y), text, font=f, fill=color)
+    if sub:
+        sf = _font(26)
+        sb = d.textbbox((0, 0), sub, font=sf)
+        d.text((C - (sb[2] - sb[0]) / 2 - sb[0], C + 52), sub, font=sf, fill=color)
+    return img
+
+
 STYLES: dict[str, Callable[[float, bool], Image.Image]] = {
     "hearts": hearts,
     "stars": stars,

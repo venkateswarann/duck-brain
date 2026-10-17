@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Liar's Duck</title>
+<style>
+  :root { --bg:#10131a; --panel:#1a2030; --border:#2c3548; --text:#eef2f8; --muted:#8d99ae; --yellow:#ffc83d; --red:#ff5a5f; --green:#3ddc84; --blue:#5b9cff; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui, -apple-system, sans-serif; min-height:100vh; }
+  .wrap { max-width:520px; margin:0 auto; padding:14px 16px 120px; }
+  h1 { font-size:22px; margin:6px 0 2px; } h1 span { color:var(--yellow); }
+  .muted { color:var(--muted); font-size:13px; }
+  input { width:100%; font:inherit; font-size:20px; padding:14px; border-radius:12px; border:1px solid var(--border); background:var(--panel); color:var(--text); }
+  button { font:inherit; border:0; border-radius:12px; padding:14px 18px; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:.35; }
+  .primary { background:var(--blue); color:#fff; width:100%; font-size:18px; margin-top:10px; }
+  .banner { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin:12px 0; font-size:17px; }
+  .banner.mine { border-color:var(--green); box-shadow:0 0 0 2px var(--green) inset; }
+  .banner.claim { border-color:var(--yellow); }
+  .bar { height:6px; background:#0c0f15; border-radius:4px; margin-top:8px; overflow:hidden; }
+  .bar > div { height:100%; background:var(--yellow); width:0; transition:width .2s linear; }
+  .hand { display:grid; grid-template-columns:repeat(auto-fill, minmax(62px, 1fr)); gap:8px; margin:10px 0; }
+  .card { background:#f6f7fb; color:#1b1f2a; border-radius:10px; height:88px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:800; font-size:26px; border:3px solid transparent; user-select:none; }
+  .card .s { font-size:22px; }
+  .card.red { color:#d6283a; }
+  .card.sel { border-color:var(--blue); transform:translateY(-6px); box-shadow:0 6px 14px rgba(91,156,255,.4); }
+  .card.match { box-shadow:0 0 0 2px var(--green); }
+  .players { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+  .pl { background:var(--panel); border:1px solid var(--border); border-radius:999px; padding:4px 10px; font-size:13px; }
+  .pl.turn { border-color:var(--green); color:var(--green); }
+  .pl.off { opacity:.45; }
+  .log { font-size:13px; color:var(--muted); }
+  .log div { padding:3px 0; border-bottom:1px solid #1e2533; }
+  .log .busted { color:var(--red); } .log .honest { color:var(--green); } .log .win { color:var(--yellow); font-weight:700; }
+  .dock { position:fixed; left:0; right:0; bottom:0; padding:10px 16px 16px; background:linear-gradient(transparent, var(--bg) 30%); }
+  .dock .row { max-width:520px; margin:0 auto; display:flex; gap:10px; }
+  #play { flex:1; background:var(--green); color:#062; font-size:18px; }
+  #quack { flex:1; background:var(--yellow); color:#3a2a00; font-size:24px; letter-spacing:.04em; }
+  #quack.live { animation:pulse .6s infinite alternate; }
+  @keyframes pulse { from { transform:scale(1); } to { transform:scale(1.04); } }
+  .toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:var(--red); color:#fff; padding:10px 16px; border-radius:10px; display:none; z-index:9; }
+  .win { text-align:center; font-size:26px; margin:20px 0; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<div class="wrap">
+  <h1>🦆 Liar's <span>Duck</span></h1>
+  <div class="muted">The duck deals and judges. Lie well. Quack loudly.</div>
+
+  <div id="join-view">
+    <div class="banner">
+      <b>How to play</b><br>
+      On your turn, play 1–4 cards face down and claim they're all the rank the duck asks for. You can lie!
+      Anyone can hit <b>QUACK!</b> to call a bluff. Caught lying? You take the pile. Wrong call? <i>You</i> take it.
+      First to empty their hand wins.
+    </div>
+    <input id="name" maxlength="16" placeholder="Your name" autocomplete="nickname">
+    <button class="primary" id="join-btn">Join the table</button>
+  </div>
+
+  <div id="game-view" class="hidden">
+    <div class="muted" id="me-line"></div>
+    <div class="banner" id="banner">Connecting…</div>
+    <div class="players" id="players"></div>
+    <div class="hand" id="hand"></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+<div class="dock hidden" id="dock">
+  <div class="row">
+    <button id="play" disabled>Play</button>
+    <button id="quack" disabled>QUACK!</button>
+  </div>
+  <div class="row"><button class="primary hidden" id="start">Start game</button></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+const NAMES = { A: "aces", J: "jacks", Q: "queens", K: "kings", "6": "sixes" };
+const plural = (r) => NAMES[r] ?? `${r}s`;
+let token = null; try { token = localStorage.getItem("liars-token"); } catch {}
+let ws = null, state = null, me = null, sel = new Set(), clockOffset = 0, lastTurn = null;
+
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 2500); }
+
+$("join-btn").onclick = async () => {
+  const name = $("name").value.trim();
+  if (!name) return $("name").focus();
+  const r = await fetch("/api/join", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+  const d = await r.json();
+  if (!r.ok) return toast(d.detail || "could not join");
+  token = d.token; try { localStorage.setItem("liars-token", token); } catch {}
+  connect();
+};
+
+function connect() {
+  $("join-view").classList.add("hidden"); $("game-view").classList.remove("hidden"); $("dock").classList.remove("hidden");
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.type === "error") return toast(msg.detail);
+    if (msg.type !== "state") return;
+    state = msg.state; me = msg.me;
+    clockOffset = Date.now() / 1000 - state.now;
+    if (!state.players.some((p) => p.id === me?.you)) { // server restarted: join again
+      try { localStorage.removeItem("liars-token"); } catch {}
+      token = null; ws.close(); $("join-view").classList.remove("hidden"); $("game-view").classList.add("hidden"); $("dock").classList.add("hidden");
+      return;
+    }
+    render();
+  };
+  ws.onclose = () => { if (token) setTimeout(connect, 1500); };
+}
+
+const send = (o) => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+$("play").onclick = () => { send({ type: "play", cards: [...sel] }); sel.clear(); };
+$("quack").onclick = () => { send({ type: "quack" }); navigator.vibrate?.(80); };
+$("start").onclick = () => send({ type: "start" });
+
+function render() {
+  const s = state, myId = me.you;
+  const mine = s.players.find((p) => p.id === myId) || {};
+  $("me-line").textContent = `You are ${mine.name} · ${mine.score ?? 0} pts · round ${s.round}`;
+  const turnName = s.players.find((p) => p.id === s.turn)?.name;
+  const myTurn = s.phase === "turn" && s.turn === myId;
+  if (myTurn && lastTurn !== `${s.round}-${s.pile}-${s.rank}`) navigator.vibrate?.([60, 40, 60]);
+  lastTurn = myTurn ? `${s.round}-${s.pile}-${s.rank}` : null;
+
+  const b = $("banner"); b.className = "banner";
+  let html = "";
+  if (s.phase === "lobby") html = `Waiting for players… (${s.players.length} at the table). Anyone can start once there are 2+.`;
+  else if (s.phase === "turn") {
+    html = myTurn ? `<b>Your turn!</b> Play 1–4 cards as <b>${plural(s.rank)}</b> (truth optional 😉)` : `${esc(turnName)} is playing <b>${plural(s.rank)}</b>…`;
+    if (myTurn) b.classList.add("mine");
+    html += `<div class="bar"><div id="timer"></div></div>`;
+  } else if (s.phase === "challenge" && s.claim) {
+    const who = s.players.find((p) => p.id === s.claim.player)?.name;
+    html = `<b>${esc(who)}</b> claims <b>${s.claim.count} ${s.claim.count > 1 ? plural(s.claim.rank) : s.claim.rank}</b>. Lie? Hit QUACK!`;
+    b.classList.add("claim");
+    html += `<div class="bar"><div id="timer"></div></div>`;
+  } else if (s.phase === "over") {
+    const w = s.players.find((p) => p.id === s.winner);
+    html = `<div class="win">🏆 ${esc(w?.name)} wins! ${s.winner === myId ? "That's you! 🎉" : ""}</div>`;
+  }
+  b.innerHTML = html;
+
+  $("players").innerHTML = s.players.map((p) =>
+    `<span class="pl ${p.id === s.turn ? "turn" : ""} ${p.connected ? "" : "off"}">${p.id === myId ? "⭐ " : ""}${esc(p.name)} · ${p.cards}🂠 · ${p.score}pt</span>`).join("")
+    + `<span class="pl">pile ${s.pile}</span>`;
+
+  for (const id of [...sel]) if (!me.hand.some((c) => c.id === id)) sel.delete(id);
+  $("hand").innerHTML = me.hand.map((c) =>
+    `<div class="card ${"♥♦".includes(c.suit) ? "red" : ""} ${sel.has(c.id) ? "sel" : ""} ${s.phase === "turn" && c.rank === s.rank ? "match" : ""}" data-id="${c.id}">${c.rank}<span class="s">${c.suit}</span></div>`).join("")
+    || `<div class="muted">No cards${s.phase === "lobby" ? " yet" : ""}.</div>`;
+  document.querySelectorAll(".card").forEach((el) => el.onclick = () => {
+    const id = +el.dataset.id;
+    if (sel.has(id)) sel.delete(id); else if (sel.size < 4) sel.add(id); else toast("Max 4 cards");
+    render();
+  });
+
+  $("log").innerHTML = s.log.slice().reverse().map((e) => `<div class="${e.kind}">${esc(e.text)}</div>`).join("");
+
+  $("play").disabled = !(myTurn && sel.size >= 1);
+  $("play").textContent = sel.size ? `Play ${sel.size} as ${plural(s.rank)}` : "Play";
+  const canQuack = s.phase === "challenge" && s.claim && s.claim.player !== myId;
+  $("quack").disabled = !canQuack;
+  $("quack").classList.toggle("live", !!canQuack);
+  $("start").classList.toggle("hidden", !["lobby", "over"].includes(s.phase) || s.players.length < 2);
+  $("start").textContent = s.phase === "over" ? "Play again" : "Start game";
+}
+
+setInterval(() => {
+  const el = $("timer"); if (!el || !state) return;
+  const now = Date.now() / 1000 - clockOffset;
+  let frac = 0;
+  if (state.phase === "turn" && state.turn_deadline) frac = (state.turn_deadline - now) / 30;
+  if (state.phase === "challenge" && state.claim) frac = (state.claim.until - now) / 6;
+  el.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+}, 200);
+
+if (token) connect();
+</script>
+</body>
+</html>

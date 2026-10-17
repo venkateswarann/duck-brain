@@ -14,6 +14,7 @@ dependencies = [
     "pyyaml>=6",
     "numpy>=1.26",
     "opencv-python-headless>=4.9,<5",  # 5.x dropped the bundled Haar cascades
+    "segno>=1.6",  # QR code for the game's join link
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ local-mic = ["sounddevice>=0.4", "webrtcvad-wheels>=2.0"]
 
 [project.scripts]
 duck-brain = "duck_brain.main:main"
+duck-game = "duck_brain.game.server:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]

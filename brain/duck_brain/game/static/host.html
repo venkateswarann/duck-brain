@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liar's Duck: table</title>
+<style>
+  :root { --bg:#0d1017; --panel:#171d2a; --border:#2a3346; --text:#eef2f8; --muted:#8d99ae; --yellow:#ffc83d; --red:#ff5a5f; --green:#3ddc84; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:18px/1.4 system-ui, sans-serif; min-height:100vh; }
+  main { display:grid; grid-template-columns:320px 1fr 380px; gap:18px; padding:18px; min-height:100vh; }
+  @media (max-width:1100px) { main { grid-template-columns:1fr; } }
+  section { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px; }
+  h1 { margin:0 0 6px; font-size:30px; } h1 span { color:var(--yellow); }
+  h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+  #qr { background:#fff; border-radius:12px; padding:10px; } #qr svg { width:100%; height:auto; display:block; }
+  .url { font-size:20px; font-weight:700; word-break:break-all; margin-top:8px; color:var(--yellow); }
+  .center { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .rank { font-size:180px; font-weight:900; line-height:1; color:var(--text); }
+  .rank.claim { color:var(--yellow); }
+  .phase { font-size:30px; margin-top:6px; }
+  .pile { font-size:22px; color:var(--muted); margin-top:8px; }
+  .bar { width:70%; height:12px; background:#0a0d13; border-radius:6px; margin-top:16px; overflow:hidden; }
+  .bar > div { height:100%; background:var(--yellow); width:0; transition:width .2s linear; }
+  table { width:100%; border-collapse:collapse; font-size:18px; }
+  td { padding:7px 4px; border-bottom:1px solid var(--border); }
+  tr.turn td { color:var(--green); font-weight:700; }
+  tr.off td { opacity:.4; }
+  td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .x { background:none; border:0; color:var(--muted); cursor:pointer; font-size:16px; }
+  .log div { padding:6px 0; border-bottom:1px solid #1f2636; font-size:17px; }
+  .log .busted { color:var(--red); font-weight:700; } .log .honest { color:var(--green); } .log .win { color:var(--yellow); font-weight:800; font-size:22px; }
+  .log .claim { color:#ffe08a; }
+  button.big { font:inherit; font-weight:800; border:0; border-radius:12px; padding:12px 18px; background:var(--green); color:#062; cursor:pointer; margin-right:8px; }
+  button.ghost { background:#283044; color:var(--text); }
+  .winner { font-size:54px; font-weight:900; color:var(--yellow); }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>🦆 Liar's <span>Duck</span></h1>
+    <div style="color:var(--muted); margin-bottom:12px">Scan to join. The duck deals, you bluff.</div>
+    <div id="qr"></div>
+    <div class="url" id="url"></div>
+    <div style="margin-top:16px">
+      <button class="big" id="start">Start game</button>
+      <button class="big ghost" id="reset">Reset scores</button>
+    </div>
+    <div style="margin-top:16px; font-size:14px; color:var(--muted)">
+      Play 1–4 cards face down as the duck's rank. Lie if you like. QUACK! calls a bluff:
+      liar caught = liar takes the pile, wrong call = caller takes it. Empty hand wins.
+      Points: win +5 · good QUACK +2 · lie that got away +1 · wrong QUACK −1.
+    </div>
+  </section>
+  <section class="center" id="stage">
+    <div class="rank" id="rank">?</div>
+    <div class="phase" id="phase">Waiting for players</div>
+    <div class="pile" id="pile"></div>
+    <div class="bar"><div id="timer"></div></div>
+  </section>
+  <section>
+    <h2>Players</h2>
+    <table id="players"></table>
+    <h2 style="margin-top:18px">What happened</h2>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+const NAMES = { A: "aces", J: "jacks", Q: "queens", K: "kings", "6": "sixes" };
+const plural = (r) => NAMES[r] ?? `${r}s`;
+let ws, state, offset = 0;
+fetch("/qr.svg").then((r) => r.text()).then((svg) => $("qr").innerHTML = svg);
+
+function connect() {
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.onmessage = (m) => { const msg = JSON.parse(m.data); if (msg.type === "state") { state = msg.state; offset = Date.now() / 1000 - state.now; render(); } };
+  ws.onclose = () => setTimeout(connect, 1500);
+}
+const send = (o) => ws?.readyState === 1 && ws.send(JSON.stringify(o));
+$("start").onclick = () => send({ type: "start" });
+$("reset").onclick = () => confirm("Reset everyone's score?") && send({ type: "reset" });
+
+function render() {
+  const s = state;
+  $("url").textContent = s.join_url;
+  const name = (id) => s.players.find((p) => p.id === id)?.name ?? "";
+  const rank = $("rank"); rank.className = "rank";
+  if (s.phase === "lobby") { rank.textContent = "🦆"; $("phase").textContent = `${s.players.length} player${s.players.length === 1 ? "" : "s"} at the table`; }
+  else if (s.phase === "turn") { rank.textContent = s.rank; $("phase").innerHTML = `<b>${esc(name(s.turn))}</b>, play your ${plural(s.rank)}`; }
+  else if (s.phase === "challenge" && s.claim) { rank.textContent = `${s.claim.count}×${s.claim.rank}`; rank.classList.add("claim"); $("phase").innerHTML = `${esc(name(s.claim.player))} claims ${s.claim.count} ${s.claim.count > 1 ? plural(s.claim.rank) : s.claim.rank}. QUACK?`; }
+  else if (s.phase === "over") { rank.innerHTML = "🏆"; $("phase").innerHTML = `<span class="winner">${esc(name(s.winner))} wins!</span>`; }
+  $("pile").textContent = s.phase === "lobby" ? "" : `Pile: ${s.pile} card${s.pile === 1 ? "" : "s"} · round ${s.round}`;
+  $("start").textContent = s.phase === "over" ? "Play again" : "Start game";
+  $("start").disabled = !["lobby", "over"].includes(s.phase) || s.players.length < 2;
+  const ranked = [...s.players].sort((a, b) => b.score - a.score);
+  $("players").innerHTML = ranked.map((p) =>
+    `<tr class="${p.id === s.turn ? "turn" : ""} ${p.connected ? "" : "off"}"><td>${esc(p.name)}</td><td class="n">${p.cards}🂠</td><td class="n">${p.score} pt</td>` +
+    `<td><button class="x" title="remove" onclick="confirm('Remove ${esc(p.name)}?') && send({type:'kick', id:'${p.id}'})">✕</button></td></tr>`).join("");
+  $("log").innerHTML = s.log.slice().reverse().map((e) => `<div class="${e.kind}">${esc(e.text)}</div>`).join("");
+}
+setInterval(() => {
+  if (!state) return;
+  const now = Date.now() / 1000 - offset;
+  let frac = 0;
+  if (state.phase === "turn" && state.turn_deadline) frac = (state.turn_deadline - now) / 30;
+  if (state.phase === "challenge" && state.claim) frac = (state.claim.until - now) / 6;
+  $("timer").style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+}, 200);
+connect();
+</script>
+</body>
+</html>

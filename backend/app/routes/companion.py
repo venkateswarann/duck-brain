@@ -219,6 +219,12 @@ async def eyes_action(req: EyesActionReq, request: Request):
     return await _eyes_call(request, "POST", "/action", req.model_dump())
 
 
+@router.post("/api/eyes/card")
+async def eyes_card(request: Request):
+    """Big text on the eyes for a few seconds: {left, right, left_sub, right_sub, hold_s, color}. hold_s 0 clears."""
+    return await _eyes_call(request, "POST", "/card", await request.json())
+
+
 @router.post("/api/eyes/blink", operation_id="eyes_blink")
 async def eyes_blink(request: Request):
     """Blink once."""

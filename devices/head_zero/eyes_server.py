@@ -48,6 +48,15 @@ class ActionReq(BaseModel):
     name: str
 
 
+class CardReq(BaseModel):
+    left: str = Field(default="", max_length=4)
+    right: str = Field(default="", max_length=4)
+    left_sub: str = Field(default="", max_length=10)
+    right_sub: str = Field(default="", max_length=10)
+    hold_s: float = Field(default=5, ge=0, le=120)
+    color: list[int] = Field(default_factory=lambda: [245, 250, 255])
+
+
 class IdleReq(BaseModel):
     enabled: bool
 
@@ -159,6 +168,15 @@ def create_app(mock: bool, fps: float) -> FastAPI:
 
             raise HTTPException(404, f"unknown eye action '{req.name}'; have {list(ACTIONS)}")
         return {"ok": True, "action": req.name, "seconds": seconds}
+
+    @app.post("/card")
+    def card(req: CardReq):
+        if req.hold_s == 0 or not (req.left or req.right):
+            engine.clear_card()
+        else:
+            color = tuple(max(0, min(255, int(c))) for c in (req.color + [255, 255, 255])[:3])
+            engine.show_card(req.left, req.right, req.hold_s, color, req.left_sub, req.right_sub)
+        return {"ok": True}
 
     @app.post("/blink")
     def blink():
