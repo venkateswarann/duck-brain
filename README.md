@@ -1,35 +1,56 @@
-# DCS — Duck Control System
+# 🦆 Duck Brain: an offline AI desk companion on an Open Duck Mini
 
-Web-based modular control stack for [Open Duck Mini](https://github.com/apirrone/Open_Duck_Mini).
+An [Open Duck Mini](https://github.com/apirrone/Open_Duck_Mini) robot duck that you **talk to**. It hears you,
+thinks with **Google's open Gemma 4 model running locally** on a laptop (Ollama, no cloud), and answers with its
+**voice, two round animated eyes, ears and head**. It can **see** through its head camera, **remembers** people,
+**follows faces**, and hosts a **bluffing card game** that a whole table plays from their phones.
 
-Joint IDs and runtime concepts are taken from:
+Because it's a robot that moves, every action the model picks goes through a **two-layer safety system**:
+a visible safety layer in the brain (allow-list, clamps, caps, stop words that skip the model entirely) and a
+second clamp on the robot itself, so any client (Gemma, Claude or any other MCP agent) can never exceed the
+joint limits.
 
-- `/home/venki/repos/embedded/duck mini /Open_Duck_Mini`
-- `/home/venki/repos/embedded/duck mini /Open_Duck_Mini_Runtime` (`rustypot_position_hwi.py` motor map)
-
-Servo API target: [python-st3215](https://github.com/Mickael-Roger/python-st3215) (optional; mock mode is default).
-
-## Duck Brain: offline AI desk companion
-
-The `feature/duck-brain` work turns the duck into an expressive desk companion. It's head and eyes only, on a stand, with no walking. **Gemma 3 4B** decides what it says and does, running locally through Ollama.
+| | |
+|---|---|
+| **Talk** | USB mic on the robot → voice activity detection → faster-whisper (laptop) → Gemma 4 → Piper voice (cute, pitched-up), streamed so it starts talking within ~1–3 s |
+| **Decide** | Gemma returns a structured JSON action (`say`, `expression`, `gestures`, `remember`), streamed so speech starts before the rest is generated |
+| **Act** | Every action is an **MCP tool** on the robot (`head_nod`, `eyes_set_expression`, `ears_gesture`, `speech_say`, `estop`, …) |
+| **Express** | 20 eye expressions incl. cartoon ones (hearts, stars, dizzy spirals, X X, ^ ^, > <, bread eyes, tears, loading), wink / eye roll / cross-eyed actions, ears that follow the mood |
+| **See** | Head camera → Gemma 4 vision ("what am I holding?"); YuNet face tracking with eased head motion and playful reactions |
+| **Play** | *Liar's Duck*: the duck deals, calls turns, shows the rank on its eyes, and judges bluffs when someone hits QUACK! on their phone |
+| **Safe** | Two-layer clamping, rate limits, gesture caps, "stop" bypasses the LLM, e-stop button, operator-only hardware switches |
+| **Monitor** | Battery voltage read from the servos themselves (no extra hardware), Pi 5 V under-voltage flags, trace UI showing every model decision and every clamp |
 
 ```text
- Laptop ── hotspot/LAN or Tailscale ──► Pi 4 (DCS :8000, /mcp)          ── USB-C ↔ USB (10.55.0.0/24) ──► Pi Zero 2 W (head)
- brain/: Gemma 3 4B, faster-whisper,    head.control → Feetech IDs 30-33                                eyes_server :8100 → 2× GC9A01
-         safety layer, face tracking,   audio.io     → USB mic (VAD) + Piper                            head_camera → head_cam stream
-         memory, trace UI :8300         eyes.link    → proxy to the Zero                                boot_status on the eyes at boot
+ Laptop (Ollama: Gemma 4)  ── Wi-Fi / Tailscale ──►  Pi 4 (DCS: FastAPI + MCP :8000)  ── USB-C link ──►  Pi Zero 2 W (head)
+ brain/: STT, Gemma, safety,                          head.control → Feetech servos (clamped)            eyes :8100 → 2× GC9A01
+         face tracking, memory, trace UI :8300         audio.io → USB mic + Piper speaker                 camera → head_cam stream
+ game:   Liar's Duck :8400 (phones)                    eyes.link → proxy to the Zero, battery monitor      ears, head lamp
 ```
+
+### Try it
+```bash
+./scripts/restart_duck.sh --brain        # restart + health/power report, then the UI and the brain
+./scripts/launch_game.sh                 # Liar's Duck: players scan the QR code on the host screen
+```
+Duck page `http://127.0.0.1:5173/duck` · brain trace `http://127.0.0.1:8300` · game `http://<laptop>:8400`.
 
 | Part | Where |
 |---|---|
-| Brain harness (Gemma, safety, MCP client, STT, tracking, trace UI) | [`brain/`](brain/README.md) |
-| Eyes, ear servos (GPIO 12/13), head lamp (GPIO 26), head camera, boot-status screens (Pi Zero) | [`devices/head_zero/`](devices/head_zero/README.md) |
-| Companion API and MCP tools (head, eyes, ears, lamp, speech, e-stop) | `backend/app/routes/companion.py`, `backend/app/nodes/{head_control,eyes_link,audio_io}.py` |
-| Duck page (eyes preview, head sliders, STOP, camera, safety events) | `frontend/src/pages/CompanionPage.tsx` → http://…:5173/duck |
-| Agent Skill ([agentskills.io](https://agentskills.io/) format) | [`skills/open-duck-control/`](skills/open-duck-control/SKILL.md) |
-| Pi 4 ↔ Zero USB network, Zero deploy | `scripts/setup_usb_link.sh`, `scripts/deploy_head_zero.sh` |
+| Brain harness (Gemma, safety layer, MCP client, STT, face tracking, memory, trace UI, model controls) | [`brain/`](brain/README.md) |
+| Liar's Duck game (rules engine, server, phone + host pages) | [`brain/duck_brain/game/`](brain/duck_brain/game/) |
+| Eyes, cartoon styles, ears, head lamp, head camera, boot screens (Pi Zero) | [`devices/head_zero/`](devices/head_zero/README.md) |
+| Companion API + MCP tools (head, eyes, ears, lamp, speech, power, e-stop) | `backend/app/routes/companion.py`, `backend/app/nodes/` |
+| Duck page (eyes, head, ears, lamp, camera, power, STOP) | `frontend/src/pages/CompanionPage.tsx` |
+| Agent Skill ([agentskills.io](https://agentskills.io/) format) so any agent can drive the duck safely | [`skills/open-duck-control/`](skills/open-duck-control/SKILL.md) |
 
-**Model:** Gemma 3 4B (`gemma3:4b`, Google DeepMind) under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). The code in this repository is MIT licensed (see `LICENSE`).
+**Model:** Gemma 4 (`gemma4:e2b`, Google DeepMind), open weights, run locally with Ollama, under the
+[Gemma Terms of Use](https://ai.google.dev/gemma/terms). The code in this repository is MIT licensed (see `LICENSE`).
+
+## DCS: the Duck Control System underneath
+
+DCS is the web-based modular control stack running on the robot's Pi 4 (FastAPI node runtime, React UI, MCP server).
+Joint IDs and runtime concepts follow the Open Duck Mini and its runtime (`rustypot_position_hwi.py` motor map).
 
 **Built before the hack day vs. for it:**
 - **Before:** the DCS core (node runtime, UI pages, servo setup and calibration, video FrameHub, read-only MCP) and the GC9A01 driver and eye art (`emo1.py`).

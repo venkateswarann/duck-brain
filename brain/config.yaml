@@ -11,8 +11,9 @@ robot:
 
 llm:
   ollama_url: http://127.0.0.1:11434
-  model: gemma3:4b                   # open-weight, vision capable
-  vision_model: gemma3:4b            # used for camera questions (launch --fast sets model: gemma3:1b, text only)
+  model: gemma4:e2b                  # Gemma 4 (open weights, multimodal): chat and vision in one model
+  vision_model: gemma4:e2b           # same model sees the camera, so no slow model swap
+  think: false                       # Gemma 4 can reason step by step; off, so the duck replies in ~1-2 s
   num_ctx: 4096
   num_predict: 160                   # keeps replies to 1-2 sentences
   temperature: 0.7

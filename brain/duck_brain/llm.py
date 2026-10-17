@@ -96,8 +96,8 @@ _SAY_RE = re.compile(r'"say"\s*:\s*"((?:[^"\\]|\\.)*)"')
 class GemmaClient:
     def __init__(self, cfg: dict[str, Any]) -> None:
         self.url = cfg.get("ollama_url", "http://127.0.0.1:11434").rstrip("/")
-        self.model = cfg.get("model", "gemma3:4b")
-        # Used instead when an image is attached (gemma3:1b can't see).
+        self.model = cfg.get("model", "gemma4:e2b")
+        # Used instead when an image is attached (only if chat uses a text-only model).
         self.vision_model = cfg.get("vision_model") or self.model
         self.options = {
             "num_ctx": int(cfg.get("num_ctx", 4096)),
@@ -108,6 +108,7 @@ class GemmaClient:
         # Keep only one model in memory: on a small GPU two models split the card
         # and both end up mostly on the CPU.
         self.single_model = bool(cfg.get("single_model", False))
+        self.think = bool(cfg.get("think", False))
         self._gpu_retried: set[str] = set()
         self.history_turns = int(cfg.get("history_turns", 6))
         self.history: list[dict[str, str]] = []
@@ -227,6 +228,9 @@ class GemmaClient:
             "stream": True,
             "options": self.options,
             "keep_alive": self.keep_alive,
+            # Gemma 4 is a reasoning model: thinking would eat the token budget before
+            # the JSON. The duck needs a quick reply, not a long deliberation.
+            "think": self.think,
         }) as r:
             r.raise_for_status()
             async for line in r.aiter_lines():

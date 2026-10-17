@@ -23,10 +23,10 @@ usage() {
 
 Options:
   --robot URL        DCS backend on the Pi 4 (repeatable; default: ${ROBOTS[*]})
-  --brain            also run the Duck Brain (needs Ollama with gemma3:4b)
+  --brain            also run the Duck Brain (needs Ollama with gemma4:e2b)
   --brain-source S   robot | local | text (default: $BRAIN_SOURCE)
   --no-tracking      brain starts with face tracking off (toggle it in the trace UI)
-  --fast             chat with gemma3:1b (quicker); camera questions still use gemma3:4b
+  --fast             chat with gemma3:1b (text only, smaller); camera questions still use gemma4:e2b
   --port N           UI port (default: $UI_PORT)
   --no-open          don't open a browser
 EOF

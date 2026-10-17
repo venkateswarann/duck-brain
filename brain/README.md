@@ -2,14 +2,14 @@
 
 An offline, open-weight AI brain for an [Open Duck Mini](https://github.com/apirrone/Open_Duck_Mini)
 desk companion. It listens, looks, remembers people, and answers with eye expressions, head gestures
-and speech. All decisions are made by **Gemma 3** running locally. No cloud calls.
+and speech. All decisions are made by **Gemma 4** running locally. No cloud calls.
 
 ## Model
 
 | | |
 |---|---|
-| Model | **Gemma 3 4B** (`gemma3:4b`, instruction-tuned, vision capable) by Google DeepMind |
-| Runtime | [Ollama](https://ollama.com/library/gemma3), running locally on the laptop |
+| Model | **Gemma 4 E2B** (`gemma4:e2b`, open weights, multimodal: chat + camera vision in one model) by Google DeepMind |
+| Runtime | [Ollama](https://ollama.com/library/gemma4), running locally on the laptop |
 | Licence / terms | [Gemma Terms of Use](https://ai.google.dev/gemma/terms) · [Prohibited Use Policy](https://ai.google.dev/gemma/prohibited_use_policy) |
 | Speech-to-text | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (`small.en`, MIT) running Whisper weights (MIT) |
 | Text-to-speech | [Piper](https://github.com/rhasspy/piper) (MIT) on the robot |
@@ -49,7 +49,7 @@ each MCP tool call, and blocked or clamped actions in red/amber with their reaso
  robot USB mic ─► /ws/audio ─► faster-whisper ─┐
  head camera  ─► /api/video/snapshot ─┬────────┤
                                       │        ▼
-                         face tracker │   Gemma 3 4B (Ollama, JSON schema)
+                         face tracker │   Gemma 4 E2B (Ollama, JSON schema)
                        (reflex, REST) │        │
                                       │        ▼
                                       │   safety layer ── stop word ─► estop
@@ -64,7 +64,7 @@ each MCP tool call, and blocked or clamped actions in red/amber with their reaso
 ```bash
 cd brain
 uv sync --extra stt                 # add --extra local-mic to use the laptop's mic
-ollama pull gemma3:4b
+ollama pull gemma4:e2b
 # set robot.urls in config.yaml (LAN/hotspot name first, Tailscale name second)
 uv run duck-brain                   # trace UI on http://127.0.0.1:8300
 ```
