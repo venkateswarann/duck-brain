@@ -60,6 +60,10 @@ class HeadControlNode(Node):
         self._t0 = time.monotonic()
         self._target = {j: 0.0 for j in HEAD_JOINTS}
         self._present: dict[str, Optional[float]] = {j: None for j in HEAD_JOINTS}
+        self._raw: Any = None
+        self._servo_power: dict[str, dict[str, Any]] = {}
+        self._power_hist: deque = deque(maxlen=720)  # (ts, volts) every 5 s: one hour
+        self._power_hist_at = 0.0
         self._queue: deque[tuple[dict[str, float], float]] = deque()  # (pose, dwell_s)
         self._dwell_until = 0.0
         self._last_cmd_at = time.monotonic()
@@ -119,6 +123,83 @@ class HeadControlNode(Node):
         self.log("holding start pose (calibrated deg): "
                  + ", ".join(f"{j}={self._cmd[j]:+.1f}" for j in HEAD_JOINTS))
         self._io = io
+        self._open_power_reader()
+
+    def _open_power_reader(self) -> None:
+        """Get a handle on the servo port for voltage/temperature reads.
+
+        rustypot (pinned 0.1.0) can only read positions, and it opens the port
+        exclusively, so a second open fails with EBUSY. It lives in this same
+        process, though, so we duplicate its file descriptor and send plain Feetech
+        read packets on it. Only the control thread uses it, between rustypot
+        calls, so the two never talk over each other.
+        """
+        self._raw = None
+        try:
+            port = os.path.realpath(self.duck.serial_port)
+            for name in os.listdir("/proc/self/fd"):
+                try:
+                    if os.path.realpath(f"/proc/self/fd/{name}") == port:
+                        self._raw = os.dup(int(name))
+                        break
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        if self._raw is None:
+            self.log("battery voltage unavailable (servo port handle not found)")
+
+    def _read_power(self, sid: int) -> Optional[tuple[float, int]]:
+        """(volts, °C) from STS3215 registers 62-63 (present voltage x0.1 V, present temperature)."""
+        if self._raw is None:
+            return None
+        import select  # noqa: PLC0415
+        import termios  # noqa: PLC0415
+
+        body = [sid, 4, 0x02, 62, 2]
+        pkt = bytes([0xFF, 0xFF, *body, (~sum(body)) & 0xFF])
+        resp = b""
+        try:
+            termios.tcflush(self._raw, termios.TCIFLUSH)
+            os.write(self._raw, pkt)
+            deadline = time.monotonic() + 0.03
+            while len(resp) < 8 and time.monotonic() < deadline:
+                ready, _, _ = select.select([self._raw], [], [], max(0.0, deadline - time.monotonic()))
+                if not ready:
+                    break
+                resp += os.read(self._raw, 8 - len(resp))
+        except OSError:
+            return None
+        i = resp.find(b"\xff\xff")
+        if i < 0 or len(resp) < i + 8 or resp[i + 2] != sid:
+            return None
+        volts, temp = resp[i + 5] / 10.0, resp[i + 6]
+        return (volts, temp) if 3.0 < volts < 20.0 else None
+
+    def _sample_power(self, joint: str) -> None:
+        reading = self._read_power(self.ids[joint])
+        now = time.time()
+        with self._lock:
+            if reading is not None:
+                self._servo_power[joint] = {"volts": reading[0], "temp_c": reading[1], "ts": now}
+            fresh = [p["volts"] for p in self._servo_power.values() if now - p["ts"] < 10]
+            if fresh and now - self._power_hist_at >= 5:
+                self._power_hist_at = now
+                self._power_hist.append((round(now, 1), round(sorted(fresh)[len(fresh) // 2], 2)))
+
+    def power(self) -> dict[str, Any]:
+        """Battery voltage as the servos see it (median of fresh readings) plus history."""
+        now = time.time()
+        with self._lock:
+            fresh = {j: p for j, p in self._servo_power.items() if now - p["ts"] < 10}
+            volts = sorted(p["volts"] for p in fresh.values())
+            return {
+                "available": self._raw is not None and not self._mock,
+                "volts": volts[len(volts) // 2] if volts else None,
+                "min_volts": volts[0] if volts else None,
+                "servos": {j: {"volts": p["volts"], "temp_c": p["temp_c"]} for j, p in fresh.items()},
+                "history": list(self._power_hist),
+            }
 
     async def on_stop(self) -> None:
         self._stop_evt.set()
@@ -133,6 +214,12 @@ class HeadControlNode(Node):
             self._task = None
         # Torque stays on: the head holds its last pose instead of flopping.
         self._io = None
+        if self._raw is not None:
+            try:
+                os.close(self._raw)
+            except OSError:
+                pass
+            self._raw = None
 
     def _offset(self, joint: str) -> float:
         return float(self.offsets.get(joint, 0.0))
@@ -300,6 +387,8 @@ class HeadControlNode(Node):
                         with self._lock:
                             for j, r in zip(HEAD_JOINTS, rads):
                                 self._present[j] = math.degrees(r - self._offset(j))
+                    elif tick % 25 == 2:  # every ~0.5 s, one servo's voltage/temperature in turn
+                        self._sample_power(HEAD_JOINTS[(tick // 25) % len(HEAD_JOINTS)])
                 except Exception as exc:  # noqa: BLE001
                     self.log(f"bus error: {exc}")
             else:

@@ -354,6 +354,68 @@ async def ws_audio(ws: WebSocket):
         node.unsubscribe(q)
 
 
+# ------------------------------------------------------------------ power
+
+# Resting LiPo voltage per cell -> % (rough; under load the voltage sags a little).
+_LIPO = [(3.30, 0), (3.50, 5), (3.60, 10), (3.70, 25), (3.75, 40), (3.80, 50), (3.85, 60),
+         (3.90, 70), (4.00, 82), (4.10, 93), (4.20, 100)]
+
+
+def _lipo_percent(cell_v: float) -> int:
+    if cell_v <= _LIPO[0][0]:
+        return 0
+    for (v0, p0), (v1, p1) in zip(_LIPO, _LIPO[1:]):
+        if cell_v <= v1:
+            return round(p0 + (p1 - p0) * (cell_v - v0) / (v1 - v0))
+    return 100
+
+
+def _throttled_flags(raw: Optional[str]) -> dict[str, Any]:
+    """Decode `vcgencmd get_throttled` (bit 0 under-voltage now, bit 16 since boot)."""
+    if not raw:
+        return {"known": False}
+    try:
+        v = int(raw.split("=")[-1].strip(), 16)
+    except ValueError:
+        return {"known": False}
+    return {"known": True, "raw": hex(v), "undervoltage_now": bool(v & 0x1), "throttled_now": bool(v & 0x4),
+            "undervoltage_since_boot": bool(v & 0x10000), "throttled_since_boot": bool(v & 0x40000)}
+
+
+def _local_throttled() -> dict[str, Any]:
+    import subprocess  # noqa: PLC0415
+
+    try:
+        out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    return _throttled_flags(out)
+
+
+@router.get("/api/power", operation_id="power_status")
+async def power_status(request: Request):
+    """Battery voltage (read from the head servos, no current sensing), estimated charge, and whether the Pi 4 or head Zero see under-voltage on their 5 V rails."""
+    cfg = request.app.state.duck.companion.battery
+    registry = request.app.state.registry
+    head = registry.get_optional("head.control")
+    batt: dict[str, Any] = {"available": False, "volts": None}
+    if isinstance(head, HeadControlNode) and head.state == NodeState.RUNNING:
+        batt = head.power()
+    volts = batt.get("volts")
+    if volts:
+        cells = cfg.cells or max(1, min(6, round(volts / 3.8)))
+        cell_v = volts / cells
+        level = ("critical" if cell_v < cfg.critical_cell_v else "low" if cell_v < cfg.low_cell_v else "ok")
+        batt.update({"cells": cells, "cells_guessed": not cfg.cells, "cell_volts": round(cell_v, 3),
+                     "percent": _lipo_percent(cell_v), "level": level})
+    import asyncio  # noqa: PLC0415
+
+    pi4 = await asyncio.to_thread(_local_throttled)
+    eyes = registry.get_optional("eyes.link")
+    zero = _throttled_flags((getattr(eyes, "health", {}) or {}).get("throttled")) if isinstance(eyes, EyesLinkNode) else {"known": False}
+    return {"ts": time.time(), "battery": batt, "pi4_5v": pi4, "zero_5v": zero}
+
+
 # ------------------------------------------------------------------ safety & status
 
 
@@ -418,6 +480,14 @@ async def companion_status(request: Request):
                    "active": ears.get("active", False), "errors": ears.get("errors", []),
                    "enabled": ears.get("enabled", {})}
     lamp = getattr(eyes, "lamp_state", {}) if out["eyes"]["online"] else {}
+    try:
+        pw = await power_status(request)
+        out["power"] = {"battery_v": pw["battery"].get("volts"), "percent": pw["battery"].get("percent"),
+                        "level": pw["battery"].get("level"),
+                        "pi4_undervoltage_now": pw["pi4_5v"].get("undervoltage_now"),
+                        "zero_undervoltage_now": pw["zero_5v"].get("undervoltage_now")}
+    except Exception:  # noqa: BLE001
+        out["power"] = {}
     out["lamp"] = {"ok": bool(lamp) and lamp.get("driver") != "mock", "on": lamp.get("on", False),
                    "brightness": lamp.get("brightness", 0.0), "error": lamp.get("error")}
 

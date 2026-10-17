@@ -87,6 +87,16 @@ class LampBlinkReq(BaseModel):
     times: int = Field(default=2, ge=1, le=10)
 
 
+def _throttled() -> str:
+    """`vcgencmd get_throttled` output, so DCS can show this Pi's 5 V under-voltage."""
+    import subprocess  # noqa: PLC0415
+
+    try:
+        return subprocess.run(["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=2).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def create_app(mock: bool, fps: float) -> FastAPI:
     calibration = load_calibration()
     expressions = load_expressions()
@@ -110,7 +120,7 @@ def create_app(mock: bool, fps: float) -> FastAPI:
     @app.get("/health")
     def health():
         return {"ok": True, "mock": mock, "frames": engine.frames,
-                "ears": body.ears.kind, "lamp": body.lamp.dev.kind}
+                "ears": body.ears.kind, "lamp": body.lamp.dev.kind, "throttled": _throttled()}
 
     @app.get("/expressions")
     def expressions_list():

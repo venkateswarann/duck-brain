@@ -38,6 +38,7 @@ export default function CompanionPage() {
   const lamp = companion.lamp ?? {};
 
   const [status, setStatus] = useState<any>({});
+  const [power, setPower] = useState<any>(null);
   const [expressions, setExpressions] = useState<string[]>([]);
   const [last, setLast] = useState<Result | null>(null);
   const [previewTick, setPreviewTick] = useState(0);
@@ -53,6 +54,15 @@ export default function CompanionPage() {
     };
     load();
     const t = window.setInterval(load, 2000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const load = () => {
+      fetch(apiUrl("/api/power")).then((r) => (r.ok ? r.json() : null)).then(setPower).catch(() => setPower(null));
+    };
+    load();
+    const t = window.setInterval(load, 3000);
     return () => window.clearInterval(t);
   }, []);
 
@@ -135,6 +145,11 @@ export default function CompanionPage() {
           <Dot on={audio.speaker} label="speaker" detail={audio.speaking ? "talking" : undefined} />
           <Dot on={status.camera?.live} label="camera" />
           <Dot on={status.brain?.online} label="brain" detail={status.brain?.detail} />
+          <Dot
+            on={power?.battery?.volts ? power.battery.level === "ok" : undefined}
+            label="battery"
+            detail={power?.battery?.volts ? `${power.battery.volts.toFixed(1)} V · ${power.battery.percent}%` : "–"}
+          />
         </span>
       </div>
 
@@ -339,6 +354,8 @@ export default function CompanionPage() {
           </form>
         </section>
 
+        <PowerCard power={power} />
+
         <section className="card" style={card}>
           <h3 style={h3}>Safety events</h3>
           {events.length === 0 && <div className="muted">No clamps or rejections yet.</div>}
@@ -355,6 +372,90 @@ export default function CompanionPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+const levelColor = (level?: string) =>
+  level === "critical" ? "var(--danger)" : level === "low" ? "var(--warn)" : "var(--accent)";
+
+function Sparkline({ points }: { points: [number, number][] }) {
+  if (points.length < 2) return <div className="muted" style={{ fontSize: 11 }}>collecting history…</div>;
+  const w = 300, h = 60;
+  const t0 = points[0][0], t1 = points[points.length - 1][0];
+  const vs = points.map((p) => p[1]);
+  const lo = Math.min(...vs) - 0.05, hi = Math.max(...vs) + 0.05;
+  const d = points
+    .map(([t, v], i) => `${i ? "L" : "M"}${(((t - t0) / Math.max(1, t1 - t0)) * w).toFixed(1)},${(h - ((v - lo) / (hi - lo)) * h).toFixed(1)}`)
+    .join(" ");
+  return (
+    <div>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 60, display: "block" }} preserveAspectRatio="none">
+        <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="muted" style={{ fontSize: 11, display: "flex", justifyContent: "space-between" }}>
+        <span>{Math.round((t1 - t0) / 60)} min ago</span>
+        <span>{lo.toFixed(2)}–{hi.toFixed(2)} V</span>
+        <span>now</span>
+      </div>
+    </div>
+  );
+}
+
+function RailRow({ name, rail }: { name: string; rail: any }) {
+  if (!rail?.known) return <div className="muted">{name}: unknown</div>;
+  const now = rail.undervoltage_now;
+  const since = rail.undervoltage_since_boot;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+      <span>{name} 5 V rail</span>
+      <span style={{ color: now ? "var(--danger)" : since ? "var(--warn)" : "var(--accent)", fontWeight: now ? 700 : 400 }}>
+        {now ? "UNDER-VOLTAGE NOW" : since ? "dipped since boot" : "OK"} <span className="muted">({rail.raw})</span>
+      </span>
+    </div>
+  );
+}
+
+function PowerCard({ power }: { power: any }) {
+  const b = power?.battery ?? {};
+  return (
+    <section className="card" style={card}>
+      <h3 style={h3}>Power</h3>
+      {b.volts ? (
+        <>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <span style={{ fontSize: 34, fontWeight: 700, color: levelColor(b.level) }}>{b.volts.toFixed(2)} V</span>
+            <span style={{ fontSize: 20 }}>{b.percent}%</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {b.cells}S{b.cells_guessed ? " (guessed)" : ""} · {b.cell_volts?.toFixed(2)} V/cell
+            </span>
+          </div>
+          <div style={{ height: 10, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, margin: "6px 0 4px" }}>
+            <div style={{ width: `${b.percent}%`, height: "100%", background: levelColor(b.level), borderRadius: 6 }} />
+          </div>
+          {b.level !== "ok" && (
+            <div style={{ color: levelColor(b.level), fontWeight: 700, margin: "4px 0" }}>
+              {b.level === "critical" ? "Battery critical: charge or swap now" : "Battery low"}
+            </div>
+          )}
+          <Sparkline points={b.history ?? []} />
+          <div className="muted" style={{ fontSize: 11, margin: "6px 0" }}>
+            servos:{" "}
+            {Object.entries(b.servos ?? {})
+              .map(([j, s]: [string, any]) => `${j.replace("head_", "")} ${s.volts.toFixed(1)} V ${s.temp_c}°C`)
+              .join(" · ")}
+          </div>
+        </>
+      ) : (
+        <div className="muted" style={{ marginBottom: 8 }}>
+          {b.available === false ? "No battery reading (head servos off or in mock mode)." : "Waiting for a reading…"}
+        </div>
+      )}
+      <RailRow name="Pi 4" rail={power?.pi4_5v} />
+      <RailRow name="Head Zero" rail={power?.zero_5v} />
+      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+        Battery = voltage the head servos measure (no current sensing; it sags while moving).
+      </div>
+    </section>
   );
 }
 

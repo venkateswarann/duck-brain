@@ -38,6 +38,8 @@ class EyesLinkNode(Node):
         self.last_state: dict[str, Any] = {}
         self.ears_state: dict[str, Any] = {}
         self.lamp_state: dict[str, Any] = {}
+        self.health: dict[str, Any] = {}
+        self._polls = 0
         self._client: Optional[httpx.AsyncClient] = None
         self._config = {"eyes_urls": self.urls}
 
@@ -106,6 +108,9 @@ class EyesLinkNode(Node):
                 self.last_state = await self.request("GET", "/state")
                 self.ears_state = await self.request("GET", "/ears")
                 self.lamp_state = await self.request("GET", "/lamp")
+                if self._polls % 5 == 0:
+                    self.health = await self.request("GET", "/health")
+                self._polls += 1
             except (EyesUnavailable, ValueError):
                 # ValueError also covers an older eyes service without /ears.
                 self.ears_state, self.lamp_state = {}, {}

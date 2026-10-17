@@ -75,6 +75,7 @@ _COMPANION_OPS = [
     "speech_stop",
     "estop",
     "companion_status",
+    "power_status",
 ]
 
 # Additional operations exposed in mcp_dev_mode

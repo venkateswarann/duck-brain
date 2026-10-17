@@ -64,8 +64,18 @@ class IdleMotionConfig(BaseModel):
     sway_deg: float = 2.0  # slow wandering in yaw (roll gets half)
 
 
+class BatteryConfig(BaseModel):
+    """Battery estimate from the servos' own voltage readings (no current sensing)."""
+
+    cells: int = 0  # LiPo cells in series; 0 = guess from the voltage (2S ~7.4 V, 3S ~11.1 V)
+    low_cell_v: float = 3.55  # per-cell warning level (under load)
+    critical_cell_v: float = 3.35  # per-cell "stop now" level
+
+
 class CompanionConfig(BaseModel):
     """Head, eyes and audio for the desk-companion (Duck Brain) mode."""
+
+    battery: BatteryConfig = Field(default_factory=BatteryConfig)
 
     eyes_urls: list[str] = Field(default_factory=lambda: ["http://10.55.0.2:8100"])
     head_limits: dict[str, HeadJointLimit] = Field(default_factory=_default_head_limits)
