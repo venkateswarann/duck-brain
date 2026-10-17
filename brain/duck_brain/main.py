@@ -218,7 +218,8 @@ class Brain:
         # A face greeting only needs a picture if it doesn't force swapping models
         # (on a small GPU with a separate vision model that costs several seconds).
         swap = self.llm.single_model and self.llm.vision_model != self.llm.model
-        if (source == "camera" and not swap) or self._wants_vision(text):
+        wants_image = (not swap) if source == "camera" else self._wants_vision(text)
+        if wants_image:
             image = await self.robot.snapshot_b64(self.stream)
             self.trace.emit("vision", status="ok" if image else "error",
                             detail="looked through the head camera" if image else "no camera frame available",
