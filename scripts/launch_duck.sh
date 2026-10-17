@@ -49,11 +49,16 @@ done
 [[ ${#CUSTOM_ROBOTS[@]} -gt 0 ]] && ROBOTS=("${CUSTOM_ROBOTS[@]}")
 
 ROBOT=""
-for url in "${ROBOTS[@]}"; do
-  if curl -sf -m 3 "$url/api/health" >/dev/null; then
-    ROBOT="$url"
-    break
-  fi
+# Wait up to 2 minutes: the Pi 4 may be mid-reboot (e.g. after a power dip).
+for attempt in $(seq 1 40); do
+  for url in "${ROBOTS[@]}"; do
+    if curl -sf -m 3 "$url/api/health" >/dev/null; then
+      ROBOT="$url"
+      break 2
+    fi
+  done
+  [[ $attempt -eq 1 ]] && echo "Waiting for the duck (DCS) at: ${ROBOTS[*]} ..."
+  sleep 3
 done
 if [[ -z "$ROBOT" ]]; then
   echo "No DCS backend answering at: ${ROBOTS[*]}" >&2
