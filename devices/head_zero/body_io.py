@@ -375,7 +375,9 @@ class Ears:
         if moving or self._queue:
             self._last_move = now
         release = float(self.cfg.get("release_after_s") or 0)
-        if release and not self.idle and now - self._last_move > release:
+        # Holding still makes hobby servos hum; cut the pulses once the ear has
+        # settled (the next move or twitch turns them back on).
+        if release and now - self._last_move > release:
             for servo in self.servos.values():
                 servo.pulse(None)
             return

@@ -7,7 +7,7 @@ import base64
 import json
 import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 from urllib.parse import urlsplit
 
 import httpx
@@ -34,6 +34,8 @@ class Robot:
         self.urls = [u.rstrip("/") for u in urls]
         self.trace = trace
         self.base: Optional[str] = None
+        # Called after (re)connecting, e.g. to switch breathing back on after the Pi 4 rebooted.
+        self.on_connect: Optional[Callable[[], Awaitable[None]]] = None
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=1.5))
 
     @property
@@ -50,9 +52,12 @@ class Robot:
             try:
                 r = await self.http.get(f"{url}/api/health", timeout=1.5)
                 if r.status_code == 200:
-                    if self.base != url:
+                    reconnected = self.base != url
+                    if reconnected:
                         self.trace.emit("robot", status="ok", detail=f"connected to DCS at {url}")
                     self.base = url
+                    if reconnected and self.on_connect is not None:
+                        asyncio.create_task(self.on_connect())
                     self.trace.set_state(robot_url=url, link=self.link)
                     return url
             except httpx.HTTPError:
@@ -62,6 +67,21 @@ class Robot:
         self.base = None
         self.trace.set_state(robot_url=None, link="offline")
         return None
+
+    async def watch_loop(self) -> None:
+        """Re-find DCS within a few seconds when it drops (Pi 4 reboot, Wi-Fi blip)."""
+        while True:
+            if self.base is None:
+                await self.discover()
+            else:
+                try:
+                    r = await self.http.get(f"{self.base}/api/health", timeout=2.0)
+                    if r.status_code != 200:
+                        raise httpx.HTTPError("unhealthy")
+                except httpx.HTTPError:
+                    self.base = None
+                    await self.discover()
+            await asyncio.sleep(2.0)
 
     async def _base(self) -> str:
         if self.base is None and await self.discover() is None:

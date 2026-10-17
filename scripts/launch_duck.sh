@@ -8,8 +8,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# Pi 4 candidates, first that answers wins: LAN mDNS, Tailscale name.
-ROBOTS=("http://rpi1.local:8000" "http://rpi1:8000")
+# Pi 4 candidates, first that answers wins: router DNS (.home), mDNS (.local),
+# Tailscale name. Override with DUCK_ROBOTS="http://host:8000 http://other:8000".
+read -r -a ROBOTS <<< "${DUCK_ROBOTS:-http://rpi1.home:8000 http://rpi1.local:8000 http://rpi1:8000}"
 WITH_BRAIN=0
 BRAIN_ARGS=()
 BRAIN_SOURCE="robot"
@@ -97,10 +98,14 @@ if [[ "$WITH_BRAIN" -eq 1 ]]; then
   fi
   (
     cd "$ROOT/brain"
+    # Give the brain every address, the working one first: if the Pi 4 reboots or
+    # mDNS drops out on the venue Wi-Fi, it fails over instead of giving up.
+    BRAIN_URLS=("$ROBOT")
+    for url in "${ROBOTS[@]}"; do [[ "$url" != "$ROBOT" ]] && BRAIN_URLS+=("$url"); done
     # GPU speech-to-text when an NVIDIA GPU is present (about 70x faster than CPU).
     STT_EXTRA=stt
     command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 && STT_EXTRA=stt-gpu
-    uv run -q --extra "$STT_EXTRA" duck-brain --source "$BRAIN_SOURCE" --robot-url "$ROBOT" "${BRAIN_ARGS[@]}" 2>&1 | sed -u 's/^/[brain] /'
+    uv run -q --extra "$STT_EXTRA" duck-brain --source "$BRAIN_SOURCE" --robot-url "${BRAIN_URLS[@]}" "${BRAIN_ARGS[@]}" 2>&1 | sed -u 's/^/[brain] /'
   ) &
   PIDS+=($!)
 fi

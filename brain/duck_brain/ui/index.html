@@ -39,6 +39,14 @@
   #gemma { padding: 12px 14px; overflow: auto; flex: 0 0 auto; max-height: 40%; border-bottom: 1px solid var(--border); }
   #vision { max-width: 100%; border-radius: 6px; margin-top: 8px; display: none; }
   form { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+  #models { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); background: #111620; font-size: 13px; }
+  #models .m { border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px 4px 10px; display: flex; gap: 6px; align-items: center; }
+  #models .m.chat { border-color: var(--blue); }
+  #models .m .gpu { font-size: 11px; color: var(--muted); }
+  #models .m .gpu.full { color: var(--ok); } #models .m .gpu.part { color: var(--warn); }
+  #models button { padding: 3px 8px; font-size: 12px; }
+  #models .busy { color: var(--warn); }
+  button.on { border-color: var(--ok); color: var(--ok); } button.off { border-color: var(--bad); color: var(--bad); }
   input[type=text] { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font: inherit; }
 </style>
 </head>
@@ -53,9 +61,11 @@
   <span class="pill" id="p-listen">listening <b>–</b></span>
   <span class="pill" id="p-speak">speaking <b>–</b></span>
   <span class="spacer"></span>
+  <button id="brain-btn" title="Off: the duck ignores speech and faces (stop words still work)">brain …</button>
   <label class="pill"><input type="checkbox" id="track"> tracking</label>
   <button class="stop" id="stop">STOP</button>
 </header>
+<div id="models"><span class="muted">models: loading…</span></div>
 <main>
   <section>
     <h2>Conversation &amp; actions</h2>
@@ -93,6 +103,9 @@ function renderState(s) {
   pill("p-listen", s.listening ? "yes" : "no", s.listening ? true : undefined);
   pill("p-speak", s.speaking ? "yes" : "no", s.speaking ? true : undefined);
   $("track").checked = !!s.tracking;
+  const on = s.brain !== "paused";
+  $("brain-btn").textContent = on ? "brain ON" : "brain OFF";
+  $("brain-btn").className = on ? "on" : "off";
 }
 
 function describe(e) {
@@ -154,6 +167,48 @@ $("say-form").onsubmit = async (ev) => {
   await fetch("/api/say", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
 };
 $("stop").onclick = () => fetch("/api/estop", { method: "POST" });
+$("brain-btn").onclick = () => fetch("/api/brain", { method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ enabled: $("brain-btn").textContent.includes("OFF") }) });
+
+// ---- models: which are loaded, how much is on the GPU, load / unload / use
+let modelsBusy = "";
+async function modelCall(path, model, label) {
+  modelsBusy = `${label} ${model ?? "all"}…`;
+  renderModels(lastModels);
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) });
+    if (r.ok) lastModels = await r.json();
+  } finally { modelsBusy = ""; renderModels(lastModels); }
+}
+let lastModels = null;
+function renderModels(st) {
+  const box = $("models");
+  if (!st) { box.innerHTML = `<span class="pill">models: Ollama not answering</span>`; return; }
+  const loaded = Object.fromEntries(st.loaded.map((m) => [m.name, m]));
+  const names = st.available.filter((n) => /gemma/i.test(n) || loaded[n]);
+  box.innerHTML = `<span class="pill">chat <b>${esc(st.chat_model)}</b></span><span class="pill">vision <b>${esc(st.vision_model)}</b></span>` +
+    (st.single_model ? `<span class="pill" title="other models are unloaded so the active one gets the whole GPU">one at a time</span>` : "") +
+    names.map((n) => {
+      const m = loaded[n];
+      const gpu = m ? `<span class="gpu ${m.gpu_pct >= 99 ? "full" : "part"}">${m.gpu_pct}% GPU · ${m.size_gb} GB</span>` : `<span class="gpu">not loaded</span>`;
+      return `<span class="m ${n === st.chat_model ? "chat" : ""}"><b>${esc(n)}</b> ${gpu}` +
+        (n !== st.chat_model ? `<button data-use="${esc(n)}">use for chat</button>` : "") +
+        (m ? `<button data-unload="${esc(n)}">unload</button>` : `<button data-load="${esc(n)}">load</button>`) + `</span>`;
+    }).join("") +
+    `<button data-unload-all>unload all</button>` + (modelsBusy ? ` <span class="busy">${esc(modelsBusy)}</span>` : "");
+  box.querySelectorAll("[data-use]").forEach((b) => b.onclick = () => modelCall("/api/models/use", b.dataset.use, "switching to"));
+  box.querySelectorAll("[data-load]").forEach((b) => b.onclick = () => modelCall("/api/models/load", b.dataset.load, "loading"));
+  box.querySelectorAll("[data-unload]").forEach((b) => b.onclick = () => modelCall("/api/models/unload", b.dataset.unload, "unloading"));
+  box.querySelectorAll("[data-unload-all]").forEach((b) => b.onclick = () => modelCall("/api/models/unload", null, "unloading"));
+}
+async function pollModels() {
+  if (!modelsBusy) {
+    try { const r = await fetch("/api/models"); lastModels = r.ok ? await r.json() : null; } catch { lastModels = null; }
+    renderModels(lastModels);
+  }
+  setTimeout(pollModels, 3000);
+}
+pollModels();
 $("track").onchange = (e) => fetch("/api/tracking", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: e.target.checked }) });
 </script>
 </body>

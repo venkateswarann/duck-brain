@@ -8,7 +8,7 @@
     "limit": 0.9,
     "max_speed": 4.0,
     "follow_expressions": true,
-    "release_after_s": 0
+    "release_after_s": 1.0
   },
   "lamp": {"gpio": 26, "active_high": true, "pwm_hz": 200}
 }

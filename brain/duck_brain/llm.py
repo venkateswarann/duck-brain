@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -98,6 +99,10 @@ class GemmaClient:
             "temperature": float(cfg.get("temperature", 0.7)),
         }
         self.keep_alive = cfg.get("keep_alive", "30m")
+        # Keep only one model in memory: on a small GPU two models split the card
+        # and both end up mostly on the CPU.
+        self.single_model = bool(cfg.get("single_model", False))
+        self._gpu_retried: set[str] = set()
         self.history_turns = int(cfg.get("history_turns", 6))
         self.history: list[dict[str, str]] = []
         self.spoke_early = False
@@ -115,8 +120,71 @@ class GemmaClient:
 
     async def warm_up(self) -> None:
         """Load the model into memory so the first real turn is fast."""
+        await self.load(self.model)
+
+    # ------------------------------------------------------------ model management
+
+    async def loaded(self) -> list[dict[str, Any]]:
+        """Models Ollama has in memory, with how much of each sits on the GPU."""
+        r = await self._client.get(f"{self.url}/api/ps", timeout=5)
+        r.raise_for_status()
+        out = []
+        for m in r.json().get("models", []):
+            size, vram = int(m.get("size") or 0), int(m.get("size_vram") or 0)
+            out.append({"name": m["name"], "size_gb": round(size / 1e9, 2), "vram_gb": round(vram / 1e9, 2),
+                        "gpu_pct": round(100 * vram / size) if size else 0})
+        return out
+
+    async def available(self) -> list[str]:
+        r = await self._client.get(f"{self.url}/api/tags", timeout=5)
+        r.raise_for_status()
+        return sorted(m["name"] for m in r.json().get("models", []))
+
+    async def unload(self, model: Optional[str] = None) -> list[str]:
+        """Free a model (or every loaded one) from memory, and wait until it's gone."""
+        names = [model] if model else [m["name"] for m in await self.loaded()]
+        for name in names:
+            await self._client.post(f"{self.url}/api/generate", json={"model": name, "keep_alive": 0}, timeout=30)
+        for _ in range(40):  # Ollama unloads in the background
+            if not any(m["name"] in names for m in await self.loaded()):
+                break
+            await asyncio.sleep(0.25)
+        return names
+
+    async def load(self, model: str) -> None:
+        """Load a model and keep it loaded; with single_model, others are unloaded first
+        so this one gets the whole GPU (a 4 GB card can't hold two)."""
+        if self.single_model:
+            loaded = await self.loaded()
+            others = [m["name"] for m in loaded if m["name"] != model]
+            for name in others:
+                await self.unload(name)
+            if others:
+                self._gpu_retried.discard(model)
+            # A model loaded while another held the GPU stays split onto the CPU.
+            # Reload it once now that it has the card to itself.
+            mine = next((m for m in loaded if m["name"] == model), None)
+            if mine and mine["gpu_pct"] < 90 and model not in self._gpu_retried:
+                self._gpu_retried.add(model)
+                await self.unload(model)
         await self._client.post(f"{self.url}/api/generate",
-                                json={"model": self.model, "prompt": "", "keep_alive": self.keep_alive})
+                                json={"model": model, "prompt": "", "keep_alive": self.keep_alive}, timeout=300)
+
+    async def _ensure_only(self, model: str) -> None:
+        if not self.single_model:
+            return
+        try:
+            loaded = await self.loaded()
+            mine = next((m for m in loaded if m["name"] == model), None)
+            stranded = mine is not None and mine["gpu_pct"] < 90 and model not in self._gpu_retried
+            if stranded or any(m["name"] != model for m in loaded):
+                await self.load(model)
+        except httpx.HTTPError:
+            pass
+
+    async def models_status(self) -> dict[str, Any]:
+        return {"chat_model": self.model, "vision_model": self.vision_model, "single_model": self.single_model,
+                "available": await self.available(), "loaded": await self.loaded()}
 
     async def decide(
         self,
@@ -141,11 +209,13 @@ class GemmaClient:
             user["images"] = [image_b64]
         messages.append(user)
 
+        target = self.vision_model if image_b64 else self.model
+        await self._ensure_only(target)
         started = time.monotonic()
         raw = ""
         said = False
         async with self._client.stream("POST", f"{self.url}/api/chat", json={
-            "model": self.vision_model if image_b64 else self.model,
+            "model": target,
             "messages": messages,
             "format": action_schema(expressions),
             "stream": True,

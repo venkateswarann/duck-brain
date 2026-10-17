@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import uvicorn
 import yaml
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -55,11 +55,14 @@ class Brain:
         self.breathing = bool(cfg.get("head", {}).get("breathing", True))
         self.ear_twitch = bool(cfg.get("head", {}).get("ear_twitch", True))
         self._estop_at = 0.0
+        self.paused = False
+        self._tracking_before_pause = self.tracker.enabled
+        self.robot.on_connect = self._on_robot_connect
 
     # ------------------------------------------------------------------ startup
 
     async def start(self) -> list[asyncio.Task]:
-        self.trace.set_state(model=self.llm.model, brain="laptop", expression="neutral", face=False,
+        self.trace.set_state(model=self.llm.model, brain="on", expression="neutral", face=False,
                              tracking=self.tracker.enabled, link="offline")
         await self.robot.discover()
         await self.refresh_robot_info()
@@ -74,6 +77,7 @@ class Brain:
         tasks = [
             asyncio.create_task(self.robot.heartbeat_loop(self.llm.model), name="heartbeat"),
             asyncio.create_task(self._refresh_loop(), name="refresh"),
+            asyncio.create_task(self.robot.watch_loop(), name="robot-watch"),
             asyncio.create_task(self.tracker.run(), name="tracking"),
         ]
         source = self.cfg.get("speech_in", {}).get("source", "robot")
@@ -115,6 +119,34 @@ class Brain:
             except Exception:  # noqa: BLE001  (no ears / older eyes service)
                 pass
 
+    async def _on_robot_connect(self) -> None:
+        """DCS came (back) up, e.g. after a Pi 4 reboot: restore what the brain had switched on."""
+        await self.refresh_robot_info()
+        if self.breathing and not self.paused and time.monotonic() - self._estop_at > 10:
+            await self.set_breathing(True)
+
+    async def set_paused(self, paused: bool) -> None:
+        """Brain off: ignore speech and faces (stop words still work). Brain on: back to normal."""
+        if paused == self.paused:
+            return
+        self.paused = paused
+        if paused:
+            self._tracking_before_pause = self.tracker.enabled
+            self.tracker.enabled = False
+            self._pending = None
+        else:
+            self.tracker.enabled = self._tracking_before_pause
+        self.trace.set_state(brain="paused" if paused else "on", tracking=self.tracker.enabled)
+        self.trace.emit("brain", status="ok", detail="paused: ignoring speech and faces (stop words still work)"
+                        if paused else "resumed")
+
+    async def set_chat_model(self, model: str) -> None:
+        self.llm.model = model
+        self.trace.set_state(model=model)
+        self.trace.emit("llm", status="ok", detail=f"chat model is now {model}; loading…")
+        await self.llm.load(model)
+        self.trace.emit("llm", status="ok", detail=f"{model} loaded")
+
     async def _refresh_loop(self) -> None:
         while True:
             await asyncio.sleep(30)
@@ -130,6 +162,8 @@ class Brain:
             self.trace.set_state(listening=False)
 
     async def on_new_face(self) -> None:
+        if self.paused:
+            return
         await self.on_text("[A person just appeared in front of you. Greet them briefly.]", "camera")
 
     async def _reflex_expression(self, name: str) -> None:
@@ -151,6 +185,9 @@ class Brain:
         if source != "camera" and self.safety.is_stop(text):
             self.trace.emit("heard", text=text, source=source)
             await self.estop(f"stop word in: “{text}”")
+            return
+        if self.paused:
+            self.trace.emit("heard", text=text, source=source, status="ignored")
             return
         if self._turn_lock.locked():
             self._pending = (text, source)  # only the latest waiting utterance is kept
@@ -178,7 +215,10 @@ class Brain:
         await self._reflex_expression("thinking")
 
         image = None
-        if source == "camera" or self._wants_vision(text):
+        # A face greeting only needs a picture if it doesn't force swapping models
+        # (on a small GPU with a separate vision model that costs several seconds).
+        swap = self.llm.single_model and self.llm.vision_model != self.llm.model
+        if (source == "camera" and not swap) or self._wants_vision(text):
             image = await self.robot.snapshot_b64(self.stream)
             self.trace.emit("vision", status="ok" if image else "error",
                             detail="looked through the head camera" if image else "no camera frame available",
@@ -288,6 +328,10 @@ class ToggleReq(BaseModel):
     enabled: bool
 
 
+class ModelReq(BaseModel):
+    model: Optional[str] = None
+
+
 def create_ui(brain: Brain) -> FastAPI:
     app = FastAPI(title="Duck Brain trace")
 
@@ -310,6 +354,41 @@ def create_ui(brain: Brain) -> FastAPI:
         brain.tracker.enabled = req.enabled
         brain.trace.set_state(tracking=req.enabled)
         return {"ok": True}
+
+    @app.post("/api/brain")
+    async def brain_toggle(req: ToggleReq):
+        await brain.set_paused(not req.enabled)
+        return {"ok": True, "enabled": not brain.paused}
+
+    @app.get("/api/models")
+    async def models():
+        try:
+            return await brain.llm.models_status()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(503, f"Ollama not answering: {exc}") from exc
+
+    @app.post("/api/models/use")
+    async def models_use(req: ModelReq):
+        """Make this the chat model and load it (unloading others in single_model mode)."""
+        if not req.model:
+            raise HTTPException(400, "model required")
+        await brain.set_chat_model(req.model)
+        return await brain.llm.models_status()
+
+    @app.post("/api/models/load")
+    async def models_load(req: ModelReq):
+        if not req.model:
+            raise HTTPException(400, "model required")
+        brain.trace.emit("llm", status="ok", detail=f"loading {req.model}…")
+        await brain.llm.load(req.model)
+        brain.trace.emit("llm", status="ok", detail=f"{req.model} loaded")
+        return await brain.llm.models_status()
+
+    @app.post("/api/models/unload")
+    async def models_unload(req: ModelReq):
+        names = await brain.llm.unload(req.model)
+        brain.trace.emit("llm", status="ok", detail=f"unloaded {', '.join(names) or 'nothing'}")
+        return await brain.llm.models_status()
 
     @app.get("/api/memory")
     async def memory():
