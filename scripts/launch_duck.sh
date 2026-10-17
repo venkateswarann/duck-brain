@@ -105,8 +105,11 @@ if [[ "$WITH_BRAIN" -eq 1 ]]; then
     cd "$ROOT/brain"
     # Give the brain every address, the working one first: if the Pi 4 reboots or
     # mDNS drops out on the venue Wi-Fi, it fails over instead of giving up.
+    # (--robot narrows the launcher's search, but the brain still gets every fallback.)
     BRAIN_URLS=("$ROBOT")
-    for url in "${ROBOTS[@]}"; do [[ "$url" != "$ROBOT" ]] && BRAIN_URLS+=("$url"); done
+    for url in "${ROBOTS[@]}" http://rpi1.local:8000 http://rpi1:8000 http://rpi1.home:8000 http://100.117.2.11:8000; do
+      [[ " ${BRAIN_URLS[*]} " == *" $url "* ]] || BRAIN_URLS+=("$url")
+    done
     # GPU speech-to-text when an NVIDIA GPU is present (about 70x faster than CPU).
     STT_EXTRA=stt
     command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 && STT_EXTRA=stt-gpu

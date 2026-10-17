@@ -103,7 +103,8 @@ class FaceTracker:
         self.face_present = False
         self.centred_after_loss = True
         self.close_since: Optional[float] = None
-        self.next_react = {"close": 0.0, "idle": time.monotonic() + 20}
+        self.next_react = {"close": 0.0, "idle": time.monotonic() + 20, "lost": 0.0}
+        self.hits = 0  # consecutive frames with a face
 
     def pause(self, seconds: float) -> None:
         self.paused_until = max(self.paused_until, time.monotonic() + seconds)
@@ -196,11 +197,14 @@ class FaceTracker:
                 now = time.monotonic()
                 if face is None:
                     head_task.cancel()
+                    self.hits = 0
                     if self.face_present and now - self.last_seen > lost_after:
                         self.face_present = False
                         self.close_since = None
                         self.trace.set_state(face=False)
-                        self._react("/api/eyes/action", {"name": "look_around"}, "face lost: looking around")
+                        if now >= self.next_react["lost"]:
+                            self.next_react["lost"] = now + 20
+                            self._react("/api/eyes/action", {"name": "look_around"}, "face lost: looking around")
                     if not self.centred_after_loss and now - self.last_seen > center_after:
                         self.centred_after_loss = True
                         self.yaw = self.pitch = 0.0
@@ -209,6 +213,10 @@ class FaceTracker:
                     continue
 
                 cx, cy, size = face
+                self.hits += 1
+                if not self.face_present and self.hits < 2:
+                    head_task.cancel()
+                    continue  # one stray detection isn't a person yet
                 if not self.face_present:
                     absent_for = now - self.last_seen if self.last_seen else 1e9
                     self.face_present = True

@@ -57,6 +57,10 @@ class Brain:
         self.ear_twitch = bool(cfg.get("head", {}).get("ear_twitch", True))
         self._estop_at = 0.0
         self.paused = False
+        self.wake_words = [w.lower() for w in sp.get("wake_words", ["duck"])]
+        self.require_wake = bool(sp.get("require_wake_word", False))
+        self.conversation_s = float(sp.get("conversation_window_s", 30))
+        self._last_reply = 0.0
         self._tracking_before_pause = self.tracker.enabled
         self.robot.on_connect = self._on_robot_connect
 
@@ -194,6 +198,10 @@ class Brain:
         if self.paused:
             self.trace.emit("heard", text=text, source=source, status="ignored")
             return
+        if source in ("robot-mic", "laptop-mic") and self.require_wake and not self._addressed(text):
+            self.trace.emit("heard", text=text, source=source, status="ignored",
+                            detail="no wake word (say “duck”)")
+            return
         if self._turn_lock.locked():
             self._pending = (text, source)  # only the latest waiting utterance is kept
             return
@@ -225,6 +233,9 @@ class Brain:
         swap = self.llm.single_model and self.llm.vision_model != self.llm.model
         wants_image = (not swap) if source == "camera" else self._wants_vision(text)
         if wants_image:
+            if swap:
+                self.trace.emit("llm", status="ok", detail=f"switching to {self.llm.vision_model} to look (takes a few seconds)")
+                await self._reflex_expression("loading")
             image = await self.robot.snapshot_b64(self.stream)
             self.trace.emit("vision", status="ok" if image else "error",
                             detail="looked through the head camera" if image else "no camera frame available",
@@ -276,6 +287,7 @@ class Brain:
             if self.memory.remember(key, value):
                 self.trace.emit("memory", detail=f"remembered {key} = {value}")
         self.trace.emit("turn", seconds=round(time.monotonic() - started, 2), turn=self.turns)
+        self._last_reply = time.monotonic()
         # A STOP switches breathing off on the robot; bring it back once things are calm.
         if self.breathing and time.monotonic() - self._estop_at > 10:
             await self.set_breathing(True)
@@ -313,6 +325,13 @@ class Brain:
             elif decision is not None and decision.status == "clamped":
                 status = "clamped"
         self.trace.emit("tool", tool=r["tool"], args=r["args"], status=status, reasons=reasons, ms=r.get("ms"))
+
+    def _addressed(self, text: str) -> bool:
+        """Spoken to the duck: says the wake word, or follows its last reply closely."""
+        t = text.lower()
+        if any(w in t for w in self.wake_words):
+            return True
+        return time.monotonic() - self._last_reply < self.conversation_s
 
     def _wants_vision(self, text: str) -> bool:
         t = f" {text.lower()} "

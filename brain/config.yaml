@@ -28,6 +28,11 @@ speech_in:
   stt_model: small.en                # faster-whisper model
   stt_device: cpu                    # ZBook: the 4 GB P1000 is kept for Gemma; CPU STT ~1.6 s per sentence
   stt_compute_type: int8
+  # Busy room: only answer speech that says the wake word, then keep listening without it
+  # for conversation_window_s after each reply. Stop words always work.
+  wake_words: ["duck", "ducky", "duckie"]
+  require_wake_word: true
+  conversation_window_s: 30
 
 safety:
   stop_words: ["stop", "duck stop", "freeze", "emergency"]
@@ -45,7 +50,10 @@ safety:
 vision:
   stream: head_cam
   # Questions that make the brain look through the camera before answering.
-  trigger_words: ["see", "look", "holding", "hold", "this", "what is", "wearing", "show", "colour", "color", "who am i", "in front"]
+  # Phrases (not single words: "this" alone matched background chatter and forced a slow model swap).
+  trigger_words: ["what do you see", "can you see", "do you see", "what can you see", "look at this", "look at me",
+                  "what am i holding", "what's this", "what is this", "what is that", "what am i wearing",
+                  "what colour", "what color", "who am i", "in front of you", "how do i look", "show you"]
 
 head:
   breathing: true                    # gentle breathing/sway idle motion while the brain runs
