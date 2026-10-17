@@ -13,7 +13,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PI4=rpi1              # ssh host of the Pi 4 (DCS)
 ZERO=bdxmini          # ssh host of the head Pi Zero
 ZERO_USB=10.55.0.2    # the Zero over the Pi 4's USB link (fallback via ssh -J)
-DCS_URL=""            # default: http://$PI4.local:8000, then http://$PI4:8000
+ZERO_USER=bdxmini
+# DCS candidates: $DUCK_ROBOTS if set, else http://$PI4.home, .local, then the bare (Tailscale) name.
 REBOOT=0
 LAUNCH=()
 WAIT_S=240
@@ -55,11 +56,11 @@ bad() { printf '  \033[31m!!\033[0m  %s\n' "$*"; }
 # Run a command on the Zero: directly (Wi-Fi/Tailscale) or through the Pi 4's USB link.
 zero_ssh() {
   "${SSH[@]}" "$ZERO" "$@" 2>/dev/null && return 0
-  "${SSH[@]}" -J "$PI4" "$(id -un)@$ZERO_USB" "$@" 2>/dev/null
+  "${SSH[@]}" -J "$PI4" "$ZERO_USER@$ZERO_USB" "$@" 2>/dev/null
 }
 
 find_dcs() {
-  for url in ${DCS_URL:-"http://$PI4.local:8000" "http://$PI4:8000"}; do
+  for url in ${DUCK_ROBOTS:-"http://$PI4.home:8000" "http://$PI4.local:8000" "http://$PI4:8000"}; do
     curl -sf -m 3 "$url/api/health" >/dev/null && { echo "$url"; return 0; }
   done
   return 1
