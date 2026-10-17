@@ -67,12 +67,16 @@ class Brain:
         await self.robot.discover()
         await self.refresh_robot_info()
         await self.set_breathing(self.breathing)
-        try:
-            await self.llm.check()
-            self.trace.emit("llm", status="ok", detail=f"{self.llm.model} via Ollama, warming up")
-            await self.llm.warm_up()
-        except Exception as exc:  # noqa: BLE001
-            self.trace.emit("llm", status="error", detail=str(exc))
+        for attempt in (1, 2):  # Ollama may still be unloading a previous model
+            try:
+                await self.llm.check()
+                self.trace.emit("llm", status="ok", detail=f"{self.llm.model} via Ollama, warming up")
+                await self.llm.warm_up()
+                break
+            except Exception as exc:  # noqa: BLE001
+                self.trace.emit("llm", status="error", detail=f"{type(exc).__name__}: {exc}"
+                                + (" (retrying)" if attempt == 1 else " (use the model bar in the trace UI to load it)"))
+                await asyncio.sleep(3)
 
         tasks = [
             asyncio.create_task(self.robot.heartbeat_loop(self.llm.model), name="heartbeat"),
