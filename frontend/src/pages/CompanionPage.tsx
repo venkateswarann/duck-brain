@@ -220,7 +220,35 @@ export default function CompanionPage() {
         </section>
 
         <section className="card" style={card}>
-          <h3 style={h3}>Ears &amp; lamp</h3>
+          <h3 style={{ ...h3, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ flex: 1 }}>Ears &amp; lamp</span>
+            {(["left", "right"] as const).map((side) => {
+              const on = ears.enabled?.[side] !== false;
+              return (
+                <button
+                  key={side}
+                  className={`btn${on ? " primary" : ""}`}
+                  style={{ fontSize: 11, padding: "2px 8px" }}
+                  title={on ? `${side} ear on; click to switch it off (silent, never driven)` : `${side} ear off; click to switch it on`}
+                  onClick={() => run("/api/ears/enable", { enabled: !on, side })}
+                >
+                  {side} {on ? "on" : "off"}
+                </button>
+              );
+            })}
+            {(() => {
+              const anyOn = ears.enabled ? Object.values(ears.enabled).some(Boolean) : true;
+              return (
+                <button
+                  className="btn"
+                  style={{ fontSize: 11, padding: "2px 8px" }}
+                  onClick={() => run("/api/ears/enable", { enabled: !anyOn })}
+                >
+                  {anyOn ? "ears off" : "ears on"}
+                </button>
+              );
+            })()}
+          </h3>
           {(["left", "right"] as const).map((side) => (
             <label key={side} style={{ display: "block", marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>

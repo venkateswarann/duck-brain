@@ -71,6 +71,19 @@ def load_config() -> dict[str, Any]:
     return cfg
 
 
+def _save_ear_enabled(enabled: dict[str, bool]) -> None:
+    """Persist the per-ear on/off switches, leaving the rest of body_config.json alone."""
+    data = json.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
+    ears = data.setdefault("ears", {})
+    for side, on in enabled.items():
+        entry = ears.setdefault(side, {})
+        if on:
+            entry.pop("enabled", None)
+        else:
+            entry["enabled"] = False
+    CONFIG_PATH.write_text(json.dumps(data, indent=2) + "\n")
+
+
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
@@ -216,9 +229,10 @@ class Ears:
 
     def __init__(self, cfg: dict[str, Any], mock: bool, lg_handle: Optional[int]) -> None:
         self.cfg = cfg
+        self._mock = mock
+        self._lg = lg_handle
         self.errors: list[str] = []
         self.servos = {side: self._open(side, mock, lg_handle) for side in ("left", "right")}
-        self.kind = self.servos["left"].kind
         self.limit = float(cfg["limit"])
 
         self._lock = threading.Lock()
@@ -253,6 +267,34 @@ class Ears:
                 return MockServo()
         self.errors.append(f"{side} ear: {hw_err}; no lgpio")
         return MockServo()
+
+    @property
+    def kind(self) -> str:
+        kinds = {s.kind for s in self.servos.values()}
+        real = sorted(kinds - {"mock"})
+        return real[0] if real else "mock"
+
+    def enabled(self) -> dict[str, bool]:
+        return {side: bool(self.cfg[side].get("enabled", True)) for side in ("left", "right")}
+
+    def set_enabled(self, enabled: bool, side: Optional[str] = None) -> dict[str, Any]:
+        """Switch ears on/off at runtime (off = never driven, silent) and save it to body_config.json."""
+        sides = [side] if side in ("left", "right") else ["left", "right"]
+        with self._lock:
+            self._queue.clear()
+            for s in sides:
+                self.servos[s].close()
+                self.cfg[s]["enabled"] = enabled
+            self.errors = [e for e in self.errors if not any(e.startswith(f"{s} ear") for s in sides)]
+            for s in sides:
+                self.servos[s] = self._open(s, self._mock, self._lg)
+            if not enabled and not any(self.enabled().values()):
+                self.idle = False
+                self._active = False
+            elif enabled:
+                self._active = False  # no pulses until the next command
+        _save_ear_enabled(self.enabled())
+        return self.state()
 
     # ------------------------------------------------------- commands
 
@@ -315,6 +357,7 @@ class Ears:
                 "limit": self.limit,
                 "gestures": list(GESTURES),
                 "errors": self.errors,
+                "enabled": self.enabled(),
             }
 
     def _apply_target(self, left: Optional[float], right: Optional[float]) -> dict[str, float]:

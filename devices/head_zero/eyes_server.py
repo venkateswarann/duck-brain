@@ -69,6 +69,11 @@ class EarGestureReq(BaseModel):
     times: int = 1  # capped at 3
 
 
+class EarsEnableReq(BaseModel):
+    enabled: bool
+    side: Optional[str] = None  # "left" | "right"; omit for both
+
+
 class LampReq(BaseModel):
     on: Optional[bool] = None
     brightness: Optional[float] = Field(default=None, ge=0.0, le=1.0)
@@ -172,6 +177,10 @@ def create_app(mock: bool, fps: float) -> FastAPI:
     def ears_stop():
         body.ears.halt()
         return body.ears.state()
+
+    @app.post("/ears/enable")
+    def ears_enable(req: EarsEnableReq):
+        return body.ears.set_enabled(req.enabled, req.side)
 
     @app.post("/ears/release")
     def ears_release():

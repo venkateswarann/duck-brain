@@ -70,6 +70,11 @@ class EarGestureReq(BaseModel):
     times: int = Field(default=1, description="Repetitions for wiggle/alert (capped at 3).")
 
 
+class EarsEnableReq(BaseModel):
+    enabled: bool = Field(description="On: the ears can be driven. Off: never driven (silent).")
+    side: Optional[str] = Field(default=None, description="left or right; omit for both.")
+
+
 class LampReq(BaseModel):
     on: Optional[bool] = Field(default=None, description="Switch the head lamp on or off.")
     brightness: Optional[float] = Field(default=None, ge=0, le=1, description="0..1; dims the lamp.")
@@ -259,6 +264,14 @@ async def ears_release(request: Request):
     return await _eyes_call(request, "POST", "/ears/release")
 
 
+# Operator switch for the hardware; deliberately not an MCP tool, so an AI agent
+# can't switch ears back on that a person turned off.
+@router.post("/api/ears/enable")
+async def ears_enable(req: EarsEnableReq, request: Request):
+    """Switch the ear servos on or off (saved on the head Zero)."""
+    return await _eyes_call(request, "POST", "/ears/enable", req.model_dump(exclude_none=True))
+
+
 @router.get("/api/ears/state", operation_id="ears_state")
 async def ears_state(request: Request):
     """Ear positions, targets, limit, driver and available gestures."""
@@ -386,7 +399,8 @@ async def companion_status(request: Request):
                    "url": getattr(eyes, "url", None)}
     ears = getattr(eyes, "ears_state", {}) if out["eyes"]["online"] else {}
     out["ears"] = {"ok": bool(ears) and ears.get("driver") != "mock", "driver": ears.get("driver"),
-                   "active": ears.get("active", False), "errors": ears.get("errors", [])}
+                   "active": ears.get("active", False), "errors": ears.get("errors", []),
+                   "enabled": ears.get("enabled", {})}
     lamp = getattr(eyes, "lamp_state", {}) if out["eyes"]["online"] else {}
     out["lamp"] = {"ok": bool(lamp) and lamp.get("driver") != "mock", "on": lamp.get("on", False),
                    "brightness": lamp.get("brightness", 0.0), "error": lamp.get("error")}
